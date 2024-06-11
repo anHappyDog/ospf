@@ -3,4 +3,19 @@ name = "ospf"
 version = "0.1.0"
 edition = "2021"
 
+
+[lib]
+name = "opsf_lib"
+path = "src/lib.rs"
+
+
+[[bin]]
+name = "ospf-cli"
+path = "src/main.rs"
+
 [dependencies]
+pnet = "0.35.0"
+tokio = "1.38.0"
+
+
+
