@@ -5,7 +5,7 @@ edition = "2021"
 
 
 [lib]
-name = "opsf_lib"
+name = "ospf_lib"
 path = "src/lib.rs"
 
 

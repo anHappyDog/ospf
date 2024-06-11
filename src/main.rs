@@ -3,6 +3,7 @@ use pnet::datalink::{self, NetworkInterface};
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::Packet;
 
+use std::net;
 
 fn test1() {
     let interface_name = "eth0"; // 根据你的系统环境调整网卡名称
@@ -46,5 +47,4 @@ fn test2() {
 }
 
 fn main() {
-    test2()
 }
