@@ -47,4 +47,8 @@ fn test2() {
 }
 
 fn main() {
+    println!("init ospf process...");
+    let router = ospf_lib::router::Router::new(net::Ipv4Addr::new(0, 0, 0, 0), net::Ipv4Addr::new(0, 0, 0, 0));
+    
+    test2();
 }
