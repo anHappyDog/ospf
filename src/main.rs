@@ -1,8 +1,11 @@
+use clap::Subcommand;
+use ospf_lib::interface;
 use pnet::datalink::Channel::Ethernet;
 use pnet::datalink::{self, NetworkInterface};
+use pnet::packet::dns::DnsTypes::A;
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::Packet;
-
+use clap::Arg;
 use std::net;
 
 fn test1() {
@@ -46,9 +49,30 @@ fn test2() {
     }
 }
 
+
+
+
+
+
+
 fn main() {
-    println!("init ospf process...");
-    let router = ospf_lib::router::Router::new(net::Ipv4Addr::new(0, 0, 0, 0), net::Ipv4Addr::new(0, 0, 0, 0));
-    
+    let pnet_ints =  ospf_lib::interface::detect_pnet_interface().expect("No interface found in the machine.");
+    let ints : Vec<interface::Interface> = Vec::new();
+    for int in pnet_ints {
+        if let Some(int) = interface::Interface::from_pnet_interface(
+            &int,
+            net::Ipv4Addr::new(0, 0, 0, 0),
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+        ) {
+            ints.push(int);
+        }
+    }
     test2();
 }

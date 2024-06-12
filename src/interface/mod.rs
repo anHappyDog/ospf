@@ -19,6 +19,14 @@ pub struct Interface {
     pub auth_key: u32,
 }
 
+pub fn detect_pnet_interface() -> Result<Vec<datalink::NetworkInterface>, &'static str> {
+    let interfaces = datalink::interfaces();
+    if interfaces.len() == 0 {
+        return Err("No interface found");
+    }
+    Ok(interfaces)
+}
+
 impl Interface {
     pub fn from_pnet_interface(
         pnet_int: &datalink::NetworkInterface,
