@@ -6,13 +6,16 @@ use crate::{
     packet::{hello::HELLO_PACKET_TYPE, send_to, try_get_from_ipv4_packet, OspfPacket},
     AllSPFRouters, OSPF_IP_PROTOCOL_NUMBER, OSPF_VERSION_2,
 };
-use pnet::{packet::{
-    ethernet::Ethernet,
-    ip::{IpNextHeaderProtocol, IpNextHeaderProtocols},
-}, transport::TransportReceiver};
 use pnet::{
     datalink::{self, DataLinkReceiver, DataLinkSender, NetworkInterface},
     transport,
+};
+use pnet::{
+    packet::{
+        ethernet::Ethernet,
+        ip::{IpNextHeaderProtocol, IpNextHeaderProtocols},
+    },
+    transport::TransportReceiver,
 };
 use std::{
     error,
@@ -78,6 +81,8 @@ pub struct Interface<'a> {
     pub channel: datalink::Channel,
     pub send_packet_handle: Option<JoinHandle<u32>>,
     pub recv_packet_handle: Option<JoinHandle<u32>>,
+    // pub deliver_hello_packet_handle: Option<JoinHandle<u32>>,
+    // pub deliver_dd_packet_handle: Option<JoinHandle<u32>>,
     pub neighbors: Arc<Mutex<Vec<net::Ipv4Addr>>>,
     pub router: Option<&'a crate::router::Router<'a>>,
 }
@@ -292,7 +297,11 @@ async fn int_send_packet<'a>(
 
 impl<'a> Interface<'a> {
     /// init the interfaces' handlers
-    pub async fn init_handlers(&'a mut self,trans_channel : &mut Box<(transport::TransportSender, transport::TransportReceiver)>) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn init_handlers(
+        &'static mut self,
+        trans_tx: &'static mut transport::TransportSender,
+        trans_rx: &'static mut transport::TransportReceiver,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let hello_interval = self.hello_interval;
         let ip_addr = self.ip_addr;
         let router_id = if let Some(router) = self.router {
@@ -313,7 +322,7 @@ impl<'a> Interface<'a> {
         // )
         // .expect("create channel failed.");
         self.send_packet_handle = Some(tokio::spawn(int_send_packet(
-            &mut trans_channel.0,
+            trans_tx,
             hello_interval as u16,
             ip_addr,
             router_id.to_bits(),
@@ -325,7 +334,7 @@ impl<'a> Interface<'a> {
             neighbors,
             network_type,
         )));
-        self.recv_packet_handle = Some(tokio::spawn(int_recv_packet(&mut trans_channel.1)));
+        self.recv_packet_handle = Some(tokio::spawn(int_recv_packet(trans_rx)));
         Ok(())
     }
     pub fn from_pnet_interface(

@@ -52,7 +52,8 @@ impl<'a> Router<'a> {
         );
         for (name, interface) in self.interfaces.iter_mut() {
             debug(&format!("init interface [{}]", name));
-            interface.init_handlers().await?;
+            let (tx, rx) = datalink::channel()?;
+            interface.init_handlers(&mut tx, &mut rx).await?;
             debug(&format!("interface [{}] init successfully", name));
         }
         Ok(())
