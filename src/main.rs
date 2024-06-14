@@ -1,11 +1,13 @@
+use clap::Arg;
 use clap::Subcommand;
 use ospf_lib::interface;
+use ospf_lib::router;
 use pnet::datalink::Channel::Ethernet;
 use pnet::datalink::{self, NetworkInterface};
 use pnet::packet::dns::DnsTypes::A;
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::Packet;
-use clap::Arg;
+use std::io::stdin;
 use std::net;
 
 fn test1() {
@@ -37,6 +39,9 @@ fn test1() {
 fn test2() {
     let interfaces = datalink::interfaces();
     for interface in interfaces {
+        if interface.is_loopback() || !interface.is_up() {
+            continue;
+        }
         println!("Name: {}", interface.name);
         println!("Description: {:?}", interface.description);
 
@@ -49,30 +54,10 @@ fn test2() {
     }
 }
 
-
-
-
-
-
-
-fn main() {
-    let pnet_ints =  ospf_lib::interface::detect_pnet_interface().expect("No interface found in the machine.");
-    let ints : Vec<interface::Interface> = Vec::new();
-    for int in pnet_ints {
-        if let Some(int) = interface::Interface::from_pnet_interface(
-            &int,
-            net::Ipv4Addr::new(0, 0, 0, 0),
-            1,
-            1,
-            1,
-            1,
-            1,
-            1,
-            1,
-            1,
-        ) {
-            ints.push(int);
-        }
-    }
-    test2();
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let interfaces = interface::create_interfaces().expect("No interface found in the machine.");
+    let mut router = router::create_simulated_router(interfaces);
+    router.init().await?;
+    Ok(())
 }
