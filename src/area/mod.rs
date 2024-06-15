@@ -11,10 +11,10 @@ pub struct AddressRange {
     network_mask: net::Ipv4Addr,
 }
 
-pub struct Area<'a> {
+pub struct Area {
     area_id: net::Ipv4Addr,
     addr_range_list: Vec<AddressRange>,
-    interface_list: Vec<interface::Interface<'a>>,
+    interface_list: Vec<interface::Interface>,
     router_lsa_list: Vec<lsa::router::RouterLinkStateAdvertisement>,
     network_lsa_list: Vec<lsa::network::NetworkLinkStateAdvertisement>,
     summary_lsa_list: Vec<lsa::summary::SummaryLinkStateAdvertisement>,
@@ -24,7 +24,7 @@ pub struct Area<'a> {
     stub_default_cost: u32,
 }
 
-impl<'a> Area<'a> {
+impl Area {
     pub fn new(
         transit_capabilty: bool,
         external_routing_capabilty: bool,

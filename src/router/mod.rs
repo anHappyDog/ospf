@@ -6,14 +6,17 @@ use crate::rtable;
 use crate::{debug, interface};
 use std::collections::HashMap;
 use std::net;
+use std::sync::{Arc, Mutex};
 
-pub struct Router<'a> {
+pub struct Router {
     router_table: Vec<rtable::RouteTable>,
     router_id: net::Ipv4Addr,
-    interfaces: HashMap<String, interface::Interface<'a>>,
+    interfaces: HashMap<String, Arc<Mutex<interface::Interface>>>,
 }
 
-pub fn create_simulated_router(interfaces: Vec<interface::Interface>) -> Router {
+pub fn create_simulated_router(
+    interfaces: HashMap<String, Arc<Mutex<interface::Interface>>>,
+) -> Arc<Mutex<Router>> {
     let router_id: u32;
     println!("Creating a simulated router...");
     loop {
@@ -28,39 +31,29 @@ pub fn create_simulated_router(interfaces: Vec<interface::Interface>) -> Router 
             }
         }
     }
-    let mut router = Router::new(net::Ipv4Addr::from_bits(router_id));
-    router.add_interfaces(interfaces);
-    println!("----------------------------------------------------");
-    println!("Router [{}]created successfully.", router.router_id);
-    println!("----------------------------------------------------");
-    println!("Router interfaces: ");
-    for (name, interface) in router.interfaces.iter() {
-        println!(
-            "{}: {}/{}, belongs to {}",
-            name, interface.ip_addr, interface.network_mask, interface.aread_id
-        );
+    let router = Arc::new(Mutex::new(Router::new(net::Ipv4Addr::from_bits(router_id))));
+    for (_, interface) in &interfaces {
+        let mut interface = interface.lock().unwrap();
+        interface.router = router.clone();
     }
-    println!("----------------------------------------------------");
+    let mut locked_router = router.lock().unwrap();
+    locked_router.add_interfaces(interfaces);
+    drop(locked_router);
     router
 }
 
-impl<'a> Router<'a> {
-    pub async fn init(&'a mut self) -> Result<(), Box<dyn std::error::Error>> {
-        println!(
-            "Router [{}]start working,now init its interfaces...",
-            self.router_id
-        );
-        for (name, interface) in self.interfaces.iter_mut() {
-            debug(&format!("init interface [{}]", name));
-            let (tx, rx) = datalink::channel()?;
-            interface.init_handlers(&mut tx, &mut rx).await?;
-            debug(&format!("interface [{}] init successfully", name));
-        }
-        Ok(())
-    }
-
+impl Router {
+    pub const MAX_INNER_PACKET_QUEUE_SIZE: usize = 100;
     pub fn get_router_id(&self) -> net::Ipv4Addr {
         self.router_id
+    }
+    pub async fn init(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        debug("Router initialized.");
+        for (_, interface) in &self.interfaces {
+            let mut interface = interface.lock().unwrap();
+            interface.init_handlers().await?;
+        }
+        Ok(())
     }
     pub fn new(router_id: net::Ipv4Addr) -> Self {
         Self {
@@ -69,12 +62,13 @@ impl<'a> Router<'a> {
             router_id,
         }
     }
-    pub fn add_interface(&mut self, interface: interface::Interface<'a>) {
-        self.interfaces.insert(interface.name.clone(), interface);
+    pub fn add_interface(&mut self, name: String, interface: Arc<Mutex<interface::Interface>>) {
+        self.interfaces.insert(name, interface);
     }
-    pub fn add_interfaces(&mut self, interfaces: Vec<interface::Interface<'a>>) {
-        for interface in interfaces {
-            self.add_interface(interface);
-        }
+    pub fn add_interfaces(
+        &mut self,
+        interfaces: HashMap<String, Arc<Mutex<interface::Interface>>>,
+    ) {
+        self.interfaces = interfaces;
     }
 }

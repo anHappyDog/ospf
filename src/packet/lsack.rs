@@ -9,6 +9,8 @@ pub struct LinkStateAcknowledgementPacket {
 
 pub const LINK_STATE_ACKNOWLEDGEMENT_PACKET_TYPE: u8 = 5;
 
+unsafe impl Send for LinkStateAcknowledgementPacket {}
+
 impl OspfPacket for LinkStateAcknowledgementPacket {
     fn to_bytes(&self) -> Vec<u8> {
         let mut result = vec![];

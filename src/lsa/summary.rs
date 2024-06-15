@@ -14,6 +14,10 @@ pub struct SummaryLinkStateAdvertisement {
     pub tos_additional_info: Option<u32>,
 }
 
+unsafe impl  Send for SummaryLinkStateAdvertisement{
+    
+}
+
 impl LinkStateAdvertisement for SummaryLinkStateAdvertisement {
     fn length(&self) -> usize {
         let mut length = 0;

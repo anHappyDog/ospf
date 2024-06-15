@@ -15,6 +15,8 @@ pub struct AsExternalLinkStateAdvertisement {
     pub tos_forwarding_addr: net::Ipv4Addr,
 }
 
+unsafe impl Send for AsExternalLinkStateAdvertisement {}
+
 impl LinkStateAdvertisement for AsExternalLinkStateAdvertisement {
     fn length(&self) -> usize {
         let mut length = 0;

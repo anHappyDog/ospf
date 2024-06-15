@@ -9,6 +9,8 @@ pub struct NetworkLinkStateAdvertisement {
     pub attached_routers: Vec<net::Ipv4Addr>,
 }
 
+unsafe impl Send for NetworkLinkStateAdvertisement {}
+
 impl LinkStateAdvertisement for NetworkLinkStateAdvertisement {
     fn length(&self) -> usize {
         let mut length = 0;

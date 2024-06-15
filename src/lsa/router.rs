@@ -19,6 +19,8 @@ pub struct RouterLinkStateAdvertisement {
     pub links: Vec<Box<RouterLink>>,
 }
 
+unsafe impl Send for RouterLinkStateAdvertisement {}
+
 impl LinkStateAdvertisement for RouterLinkStateAdvertisement {
     /// # wrong
     fn length(&self) -> usize {

@@ -42,6 +42,8 @@ pub struct LinkStateAdvertisementHeader {
     pub length: u16,
 }
 
+unsafe impl Send for LinkStateAdvertisementHeader {}
+
 impl LinkStateAdvertisementHeader {
     pub fn new(
         age: u16,

@@ -1,38 +1,25 @@
-pub mod event;
-pub mod status;
-use crate::{
-    debug,
-    lsa::network,
-    packet::{hello::HELLO_PACKET_TYPE, send_to, try_get_from_ipv4_packet, OspfPacket},
-    AllSPFRouters, OSPF_IP_PROTOCOL_NUMBER, OSPF_VERSION_2,
-};
-use pnet::{
-    datalink::{self, DataLinkReceiver, DataLinkSender, NetworkInterface},
-    transport,
-};
-use pnet::{
-    packet::{
-        ethernet::Ethernet,
-        ip::{IpNextHeaderProtocol, IpNextHeaderProtocols},
-    },
-    transport::TransportReceiver,
-};
 use std::{
-    error,
-    future::Future,
-    io::{stdin, stdout, Write},
+    collections::HashMap,
     mem::size_of,
-    net::{self, IpAddr, Ipv4Addr},
-    sync::{Arc, Mutex},
+    net,
+    sync::{mpsc, Arc, Mutex},
 };
-use tokio::task::JoinHandle;
-use tokio::time; // Import the missing variant
+
+use pnet::{
+    datalink,
+    packet::ip::IpNextHeaderProtocols::Udp,
+    transport::{self, TransportReceiver, TransportSender},
+};
+use tokio::{sync::broadcast, task::JoinHandle, time};
 
 use crate::{
-    area,
-    packet::{self, calculate_checksum, hello},
-    prompt_and_read,
+    debug, interface,
+    packet::{hello::HELLO_PACKET_TYPE, try_get_from_ipv4_packet, OspfPacket},
+    prompt_and_read, router, AllSPFRouters, OSPF_VERSION_2,
 };
+pub mod event;
+pub mod handle;
+pub mod status;
 
 #[derive(Clone, Copy)]
 pub enum InterfaceNetworkType {
@@ -64,7 +51,7 @@ impl std::fmt::Debug for InterfaceNetworkType {
     }
 }
 
-pub struct Interface<'a> {
+pub struct Interface {
     pub name: String,
     pub ip_addr: net::Ipv4Addr,
     pub network_mask: net::Ipv4Addr,
@@ -78,13 +65,16 @@ pub struct Interface<'a> {
     pub auth_type: u32,
     pub auth_key: u64,
     pub network_type: InterfaceNetworkType,
-    pub channel: datalink::Channel,
-    pub send_packet_handle: Option<JoinHandle<u32>>,
-    pub recv_packet_handle: Option<JoinHandle<u32>>,
-    // pub deliver_hello_packet_handle: Option<JoinHandle<u32>>,
-    // pub deliver_dd_packet_handle: Option<JoinHandle<u32>>,
+    pub trans_rx: TransportReceiver,
+    pub trans_tx: TransportSender,
+    pub inner_rx: broadcast::Receiver<Arc<Mutex<dyn crate::packet::OspfPacket + Send>>>,
+    pub inner_tx: broadcast::Sender<Arc<Mutex<dyn crate::packet::OspfPacket + Send>>>,
+    pub send_packet_handle: Option<JoinHandle<()>>,
+    pub recv_packet_handle: Option<JoinHandle<()>>,
+    pub produce_hello_packet_handle: Option<JoinHandle<()>>,
+    pub produce_dd_packet_handle: Option<JoinHandle<()>>,
     pub neighbors: Arc<Mutex<Vec<net::Ipv4Addr>>>,
-    pub router: Option<&'a crate::router::Router<'a>>,
+    pub router: Arc<Mutex<crate::router::Router>>,
 }
 
 pub const DEFAULT_HELLO_INTERVAL: u32 = 10;
@@ -110,8 +100,8 @@ fn is_valid_pnet_interface(pnet_int: &datalink::NetworkInterface) -> bool {
         return false;
     }
     for ip in &pnet_int.ips {
-        if let IpAddr::V4(_) = ip.ip() {
-            if let IpAddr::V4(_) = ip.mask() {
+        if let net::IpAddr::V4(_) = ip.ip() {
+            if let net::IpAddr::V4(_) = ip.mask() {
                 return true;
             }
         }
@@ -119,9 +109,11 @@ fn is_valid_pnet_interface(pnet_int: &datalink::NetworkInterface) -> bool {
     false
 }
 
-pub fn create_interfaces<'a>() -> Result<Vec<Interface<'a>>, &'static str> {
+pub fn create_interfaces<'a>(
+    router: Arc<Mutex<router::Router>>,
+) -> Result<HashMap<String, Arc<Mutex<interface::Interface>>>, &'static str> {
     let pnet_ints = detect_pnet_interface()?;
-    let mut ints = Vec::new();
+    let mut ints = HashMap::new();
     for int in pnet_ints {
         if !is_valid_pnet_interface(&int) {
             continue;
@@ -184,6 +176,7 @@ pub fn create_interfaces<'a>() -> Result<Vec<Interface<'a>>, &'static str> {
         .unwrap_or(DEFAULT_AUTH_KEY);
 
         if let Some(int) = Interface::from_pnet_interface(
+            router.clone(),
             &int,
             net::Ipv4Addr::from(area_id),
             output_cost,
@@ -195,7 +188,7 @@ pub fn create_interfaces<'a>() -> Result<Vec<Interface<'a>>, &'static str> {
             auth_type,
             auth_key,
         ) {
-            ints.push(int);
+            ints.insert(int.name.clone(), Arc::new(Mutex::new(int)));
         }
     }
     println!("----------------- all interfaces are set,adding to router -------");
@@ -208,10 +201,10 @@ async fn int_recv_packet<'a>(rx: &mut transport::TransportReceiver) -> u32 {
 
     loop {
         if let Ok((packet, _)) = packet_iter.next() {
-            if packet.get_dscp() == OSPF_IP_PROTOCOL_NUMBER {
+            if packet.get_dscp() == crate::OSPF_IP_PROTOCOL_NUMBER {
                 debug(&format!("recv ospf packet."));
-                let mut possible_neighbors = Vec::new();
-                let ospf_packet = try_get_from_ipv4_packet(&packet, &mut possible_neighbors);
+                let possible_neighbors = Arc::new(Mutex::new(Vec::new()));
+                let ospf_packet = try_get_from_ipv4_packet(&packet, possible_neighbors);
                 let ospf_packet = match ospf_packet {
                     Ok(p) => p,
                     Err(e) => {
@@ -221,7 +214,7 @@ async fn int_recv_packet<'a>(rx: &mut transport::TransportReceiver) -> u32 {
                 };
                 debug(&format!(
                     "recv ospf [type is {}] packet",
-                    ospf_packet.get_type()
+                    ospf_packet.lock().unwrap().get_type()
                 ));
             } else {
                 debug(&format!("recv packet, but not ospf packet."));
@@ -251,10 +244,10 @@ async fn int_send_packet<'a>(
 ) -> u32 {
     let mut send_packet_count = 0;
     let hello_send_interval = time::Duration::from_secs(hello_interval as u64);
-    let default_ospf_header_length = size_of::<packet::OspfPacketHeader>();
+    let default_ospf_header_length = size_of::<crate::packet::OspfPacketHeader>();
     loop {
         time::sleep(hello_send_interval).await;
-        let ospf_packet_header = packet::OspfPacketHeader::new(
+        let ospf_packet_header = crate::packet::OspfPacketHeader::new(
             OSPF_VERSION_2,
             HELLO_PACKET_TYPE,
             default_ospf_header_length as u16,
@@ -264,8 +257,7 @@ async fn int_send_packet<'a>(
             auth_type,
             0,
         );
-        let n = neighbors.lock().expect("lock failed when send packet");
-        let mut ospf_hello_packet = packet::hello::HelloPacket::new(
+        let mut ospf_hello_packet = crate::packet::hello::HelloPacket::new(
             netwok_mask,
             hello_interval,
             0,
@@ -274,70 +266,74 @@ async fn int_send_packet<'a>(
             0,
             0,
             ospf_packet_header,
-            n.as_ref(),
+            neighbors.clone(),
         );
         ospf_hello_packet.calculate_checksum();
         match network_type {
             InterfaceNetworkType::Broadcast => {
-                packet::send_to(&ospf_hello_packet, tx, ip_addr, AllSPFRouters);
+                crate::packet::send_to(&ospf_hello_packet, tx, ip_addr, AllSPFRouters);
             }
             InterfaceNetworkType::PointToPoint => {
-                packet::send_to(&ospf_hello_packet, tx, ip_addr, AllSPFRouters);
+                crate::packet::send_to(&ospf_hello_packet, tx, ip_addr, AllSPFRouters);
             }
             _ => {
                 break;
             }
         }
-        drop(n);
         send_packet_count += 1;
     }
 
     send_packet_count
 }
 
-impl<'a> Interface<'a> {
+impl Interface {
+    pub const INNER_PACKET_QUEUE_SIZE: u32 = 128;
+
+    pub fn get_neighbors(&self) -> Arc<Mutex<Vec<net::Ipv4Addr>>> {
+        self.neighbors.clone()
+    }
+
+    pub fn get_area_id(&self) -> net::Ipv4Addr {
+        self.aread_id
+    }
     /// init the interfaces' handlers
-    pub async fn init_handlers(
-        &'static mut self,
-        trans_tx: &'static mut transport::TransportSender,
-        trans_rx: &'static mut transport::TransportReceiver,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn init_handlers(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let hello_interval = self.hello_interval;
         let ip_addr = self.ip_addr;
-        let router_id = if let Some(router) = self.router {
-            router.get_router_id()
-        } else {
-            return Err(Box::new(crate::error::RouterNotSetError));
-        };
+        let router = self.router.clone();
+        let router_id = router.lock().unwrap().get_router_id();
+
         let area_id = self.aread_id;
         let auth_type = self.auth_type;
         let network_type = self.network_type;
         let network_mask = self.network_mask;
         let router_priority = self.router_priority;
         let router_dead_interval = self.router_dead_interval;
-        let neighbors = self.neighbors.clone();
-        // let (mut tx, mut rx) = pnet::transport::transport_channel(
-        //     crate::MTU,
-        //     transport::TransportChannelType::Layer3(IpNextHeaderProtocols::Udp),
-        // )
-        // .expect("create channel failed.");
-        self.send_packet_handle = Some(tokio::spawn(int_send_packet(
+        let neighbors: Arc<Mutex<Vec<net::Ipv4Addr>>> = self.neighbors.clone();
+        let (trans_tx, trans_rx) =
+            transport::transport_channel(1500, transport::TransportChannelType::Layer3(Udp))
+                .unwrap();
+
+        let (inner_tx, inner_rx) = broadcast::channel::<Arc<Mutex<dyn OspfPacket + Send>>>(
+            Interface::INNER_PACKET_QUEUE_SIZE as usize,
+        );
+
+        self.send_packet_handle = Some(tokio::spawn(handle::create_send_packet_handle(
+            inner_rx,
             trans_tx,
-            hello_interval as u16,
             ip_addr,
-            router_id.to_bits(),
-            area_id.to_bits(),
-            auth_type as u8,
-            network_mask,
-            router_priority as u8,
-            router_dead_interval,
-            neighbors,
+            AllSPFRouters,
             network_type,
         )));
-        self.recv_packet_handle = Some(tokio::spawn(int_recv_packet(trans_rx)));
+        self.recv_packet_handle = Some(tokio::spawn(handle::create_recv_packet_handle(
+            trans_rx, inner_tx,
+        )));
+        // self.produce_hello_packet_handle = Some(tokio::spawn(handle::create_hello_packet_handle()));
+        self.produce_dd_packet_handle = Some(tokio::spawn(handle::create_dd_packet_handle()));
         Ok(())
     }
     pub fn from_pnet_interface(
+        router: Arc<Mutex<router::Router>>,
         pnet_int: &datalink::NetworkInterface,
         aread_id: net::Ipv4Addr,
         output_cost: u32,
@@ -352,13 +348,13 @@ impl<'a> Interface<'a> {
         if pnet_int.is_loopback() || !pnet_int.is_up() {
             return None;
         }
-        let mut ip_addr = Ipv4Addr::new(255, 255, 255, 255); //false addr
-        let mut network_mask = Ipv4Addr::new(255, 255, 255, 255);
+        let mut ip_addr = net::Ipv4Addr::new(255, 255, 255, 255); //false addr
+        let mut network_mask = net::Ipv4Addr::new(255, 255, 255, 255);
         let mut network_type = InterfaceNetworkType::Broadcast;
         let mut found_ip_flag = false;
         for ip in &pnet_int.ips {
-            if let IpAddr::V4(taddr) = ip.ip() {
-                if let IpAddr::V4(tmask) = ip.mask() {
+            if let net::IpAddr::V4(taddr) = ip.ip() {
+                if let net::IpAddr::V4(tmask) = ip.mask() {
                     ip_addr = taddr;
                     network_mask = tmask;
                     found_ip_flag = true;
@@ -382,6 +378,14 @@ impl<'a> Interface<'a> {
         println!("interface [{}] set.", name);
         println!("interface ipv4 addr: {}", ip_addr);
         println!("interface network mask: {}", network_mask);
+
+        let (inner_tx, inner_rx) = broadcast::channel::<Arc<Mutex<dyn OspfPacket + Send>>>(
+            Interface::INNER_PACKET_QUEUE_SIZE as usize,
+        );
+        let (trans_tx, trans_rx) =
+            transport::transport_channel(1500, transport::TransportChannelType::Layer3(Udp))
+                .unwrap();
+
         let int = Self::new(
             ip_addr,
             network_mask,
@@ -396,7 +400,11 @@ impl<'a> Interface<'a> {
             auth_key,
             name,
             network_type,
-            pnet_int,
+            inner_tx,
+            inner_rx,
+            trans_tx,
+            trans_rx,
+            router,
         );
         Some(int)
     }
@@ -427,7 +435,11 @@ impl<'a> Interface<'a> {
         auth_key: u64,
         name: String,
         network_type: InterfaceNetworkType,
-        pnet_int: &NetworkInterface,
+        inner_tx: broadcast::Sender<Arc<Mutex<dyn crate::packet::OspfPacket + Send>>>,
+        inner_rx: broadcast::Receiver<Arc<Mutex<dyn crate::packet::OspfPacket + Send>>>,
+        trans_tx: transport::TransportSender,
+        trans_rx: transport::TransportReceiver,
+        router: Arc<Mutex<router::Router>>,
     ) -> Self {
         Self {
             name,
@@ -443,12 +455,16 @@ impl<'a> Interface<'a> {
             auth_type,
             auth_key,
             network_type,
-            channel: datalink::channel(pnet_int, Default::default())
-                .expect("create channel failed."),
             send_packet_handle: None,
             recv_packet_handle: None,
+            produce_dd_packet_handle: None,
+            produce_hello_packet_handle: None,
             neighbors: Arc::new(Mutex::new(Vec::new())),
-            router: None,
+            router: router,
+            inner_tx,
+            inner_rx,
+            trans_rx,
+            trans_tx,
         }
     }
 }

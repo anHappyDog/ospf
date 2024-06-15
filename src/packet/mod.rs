@@ -11,9 +11,11 @@ use pnet::packet::{MutablePacket, Packet};
 use pnet::transport::{transport_channel, TransportChannelType::Layer3};
 use pnet::{transport, util};
 use std::net;
+use std::sync::{Arc, Mutex};
 
 use crate::{debug, OSPF_IP_PROTOCOL_NUMBER, OSPF_VERSION_2};
 
+#[derive(Clone, Copy)]
 pub struct OspfPacketHeader {
     pub version: u8,
     pub packet_type: u8,
@@ -24,6 +26,8 @@ pub struct OspfPacketHeader {
     pub auth_type: u8,
     pub authentication: [u8; 8],
 }
+
+unsafe impl Send for OspfPacketHeader {}
 
 pub fn calculate_checksum(data: &[u16]) -> u16 {
     let mut sum: u32 = 0;
@@ -126,10 +130,10 @@ pub(self) fn new_ip_packets(
     Ok(ip_packet)
 }
 
-pub fn try_get_from_ipv4_packet<'a>(
+pub fn try_get_from_ipv4_packet(
     ip_packet: &Ipv4Packet,
-    hello_neighbors: &'a mut Vec<net::Ipv4Addr>,
-) -> Result<Box<dyn OspfPacket + 'a>, &'static str> {
+    hello_neighbors: Arc<Mutex<Vec<net::Ipv4Addr>>>,
+) -> Result<Arc<Mutex<dyn OspfPacket + Send>>, &'static str> {
     if ip_packet.get_dscp() != OSPF_IP_PROTOCOL_NUMBER {
         return Err("not an ospf packet");
     }
@@ -140,23 +144,22 @@ pub fn try_get_from_ipv4_packet<'a>(
     if ospf_packet[0] != OSPF_VERSION_2 {
         return Err("not an ospf version 2 packet");
     }
-    let ospf_packet: Box<dyn OspfPacket> = match ospf_packet[1] {
-        crate::packet::hello::HELLO_PACKET_TYPE => Box::new(hello::HelloPacket::from_be_bytes(
-            ospf_packet,
-            hello_neighbors,
+    let ospf_packet: Arc<Mutex<dyn OspfPacket + Send>> = match ospf_packet[1] {
+        crate::packet::hello::HELLO_PACKET_TYPE => Arc::new(Mutex::new(
+            hello::HelloPacket::from_be_bytes(ospf_packet, hello_neighbors),
         )),
-        crate::packet::dd::DATA_DESCRIPTION_PACKET_TYPE => {
-            Box::new(dd::DataDescriptionPacket::from_be_bytes(ospf_packet))
-        }
-        crate::packet::lsr::LINK_STATE_REQUEST_PACKET_TYPE => {
-            Box::new(lsr::LinkStateRequestPacket::from_be_bytes(ospf_packet))
-        }
-        crate::packet::lsack::LINK_STATE_ACKNOWLEDGEMENT_PACKET_TYPE => Box::new(
+        crate::packet::dd::DATA_DESCRIPTION_PACKET_TYPE => Arc::new(Mutex::new(
+            dd::DataDescriptionPacket::from_be_bytes(ospf_packet),
+        )),
+        crate::packet::lsr::LINK_STATE_REQUEST_PACKET_TYPE => Arc::new(Mutex::new(
+            lsr::LinkStateRequestPacket::from_be_bytes(ospf_packet),
+        )),
+        crate::packet::lsack::LINK_STATE_ACKNOWLEDGEMENT_PACKET_TYPE => Arc::new(Mutex::new(
             lsack::LinkStateAcknowledgementPacket::from_be_bytes(ospf_packet),
-        ),
-        crate::packet::lsu::LINK_STATE_UPDATE_TYPE => {
-            Box::new(lsu::LinkStateUpdatePacket::from_be_bytes(ospf_packet))
-        }
+        )),
+        crate::packet::lsu::LINK_STATE_UPDATE_TYPE => Arc::new(Mutex::new(
+            lsu::LinkStateUpdatePacket::from_be_bytes(ospf_packet),
+        )),
         _ => return Err("unknown packet type"),
     };
     Ok(ospf_packet)

@@ -13,6 +13,9 @@ pub struct LinkStateRequestPacket {
 
 pub const LINK_STATE_REQUEST_PACKET_TYPE: u8 = 3;
 
+unsafe impl Send for LinkStatusRequest {}
+unsafe impl Send for LinkStateRequestPacket {}
+
 impl LinkStatusRequest {
     pub fn new(ls_type: u32, link_state_id: u32, advertising_router: u32) -> Self {
         Self {
@@ -56,7 +59,6 @@ impl OspfPacket for LinkStateRequestPacket {
     }
     fn get_type(&self) -> u8 {
         LINK_STATE_REQUEST_PACKET_TYPE
-    
     }
 }
 

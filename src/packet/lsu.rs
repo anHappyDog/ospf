@@ -9,6 +9,8 @@ pub struct LinkStateUpdatePacket {
 
 pub const LINK_STATE_UPDATE_TYPE: u8 = 4;
 
+unsafe impl Send for LinkStateUpdatePacket {}
+
 impl OspfPacket for LinkStateUpdatePacket {
     fn to_be_bytes(&self) -> Vec<u8> {
         let mut result = vec![];

@@ -17,6 +17,8 @@ pub struct DataDescriptionPacket {
     pub lsa_headers: Vec<LinkStateAdvertisementHeader>,
 }
 
+unsafe impl Send for DataDescriptionPacket {}
+
 impl OspfPacket for DataDescriptionPacket {
     fn length(&self) -> usize {
         let mut length = 0;
