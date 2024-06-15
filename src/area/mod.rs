@@ -2,7 +2,7 @@ use std::net;
 
 use crate::{
     interface,
-    lsa::{self, router},
+    lsa::{self},
 };
 
 pub struct AddressRange {

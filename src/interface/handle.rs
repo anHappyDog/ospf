@@ -1,5 +1,4 @@
 use std::{
-    env::consts::ARCH,
     net,
     sync::{Arc, Mutex},
 };
@@ -8,9 +7,8 @@ use pnet::transport::{self, ipv4_packet_iter};
 use tokio::{sync::broadcast, time};
 
 use crate::{
-    area,
     lsa::router,
-    packet::{self, send_to},
+    packet::{self, send_to, OspfPacket},
     OSPF_VERSION_2,
 };
 
@@ -40,7 +38,7 @@ pub(super) async fn create_send_packet_handle(
 
 pub(super) async fn create_recv_packet_handle(
     mut trans_rx: transport::TransportReceiver,
-    mut inner_tx: broadcast::Sender<Arc<Mutex<dyn packet::OspfPacket + Send>>>,
+    inner_tx: broadcast::Sender<Arc<Mutex<dyn packet::OspfPacket + Send>>>,
 ) {
     let mut ipv4_packet_iter = ipv4_packet_iter(&mut trans_rx);
     loop {
@@ -62,19 +60,18 @@ pub(super) async fn create_recv_packet_handle(
 }
 
 pub(super) async fn create_hello_packet_handle(
-    inner_tx: broadcast::Sender<Arc<Mutex<dyn packet::OspfPacket>>>,
-    interface: Arc<Mutex<crate::interface::Interface>>,
+    inner_tx: broadcast::Sender<Arc<Mutex<dyn packet::OspfPacket + Send>>>,
+    neighbors: Arc<Mutex<Vec<net::Ipv4Addr>>>,
+    hello_interval: u64,
+    network_mask: net::Ipv4Addr,
+    router_priority: u8,
+    router_dead_interval: u32,
+    options: u8,
+
     router_id: u32,
     area_id: u32,
     auth_type: u8,
 ) {
-    let int = interface.lock().unwrap();
-    let neighbors = int.neighbors.clone();
-    let hello_interval = int.hello_interval as u64;
-    let network_mask = int.network_mask;
-    let router_priority = int.router_priority;
-    let options = 0;
-    let router_dead_priority = int.router_dead_interval;
     let hello_duration = time::Duration::from_secs(hello_interval as u64);
     let designated_router = 0;
     let backup_designated_router = 0;
@@ -89,8 +86,6 @@ pub(super) async fn create_hello_packet_handle(
         0,
     );
 
-    drop(int);
-
     loop {
         time::sleep(hello_duration).await;
 
@@ -99,7 +94,7 @@ pub(super) async fn create_hello_packet_handle(
             hello_interval as u16,
             options,
             router_priority as u8,
-            router_dead_priority,
+            router_dead_interval,
             designated_router,
             backup_designated_router,
             ospf_packet_header,

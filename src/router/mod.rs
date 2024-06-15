@@ -1,7 +1,4 @@
-use pnet::datalink;
 
-use crate::lsa::network::NetworkLinkStateAdvertisement;
-use crate::lsa::LinkStateAdvertisement;
 use crate::rtable;
 use crate::{debug, interface};
 use std::collections::HashMap;

@@ -4,16 +4,14 @@ pub mod lsack;
 pub mod lsr;
 pub mod lsu;
 
-use hello::HELLO_PACKET_TYPE;
 use pnet::packet::ip::IpNextHeaderProtocols;
-use pnet::packet::ipv4::{self, Ipv4Packet, MutableIpv4Packet};
-use pnet::packet::{MutablePacket, Packet};
-use pnet::transport::{transport_channel, TransportChannelType::Layer3};
-use pnet::{transport, util};
+use pnet::packet::ipv4::{Ipv4Packet, MutableIpv4Packet};
+use pnet::packet::{Packet};
+use pnet::{transport};
 use std::net;
 use std::sync::{Arc, Mutex};
 
-use crate::{debug, OSPF_IP_PROTOCOL_NUMBER, OSPF_VERSION_2};
+use crate::{OSPF_IP_PROTOCOL_NUMBER, OSPF_VERSION_2};
 
 #[derive(Clone, Copy)]
 pub struct OspfPacketHeader {

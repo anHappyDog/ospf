@@ -1,5 +1,4 @@
 use core::net;
-use std::str::FromStr;
 
 use as_external::AS_EXTERNAL_LINK_STATE_TYPE;
 use network::NETWORK_LINK_STATE_TYPE;

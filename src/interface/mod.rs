@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     mem::size_of,
     net,
-    sync::{mpsc, Arc, Mutex},
+    sync::{Arc, Mutex},
 };
 
 use pnet::{
@@ -271,10 +271,10 @@ async fn int_send_packet<'a>(
         ospf_hello_packet.calculate_checksum();
         match network_type {
             InterfaceNetworkType::Broadcast => {
-                crate::packet::send_to(&ospf_hello_packet, tx, ip_addr, AllSPFRouters);
+                let _ = crate::packet::send_to(&ospf_hello_packet, tx, ip_addr, AllSPFRouters);
             }
             InterfaceNetworkType::PointToPoint => {
-                crate::packet::send_to(&ospf_hello_packet, tx, ip_addr, AllSPFRouters);
+                let _ = crate::packet::send_to(&ospf_hello_packet, tx, ip_addr, AllSPFRouters);
             }
             _ => {
                 break;
@@ -310,6 +310,7 @@ impl Interface {
         let router_priority = self.router_priority;
         let router_dead_interval = self.router_dead_interval;
         let neighbors: Arc<Mutex<Vec<net::Ipv4Addr>>> = self.neighbors.clone();
+
         let (trans_tx, trans_rx) =
             transport::transport_channel(1500, transport::TransportChannelType::Layer3(Udp))
                 .unwrap();
@@ -326,9 +327,21 @@ impl Interface {
             network_type,
         )));
         self.recv_packet_handle = Some(tokio::spawn(handle::create_recv_packet_handle(
-            trans_rx, inner_tx,
+            trans_rx,
+            inner_tx.clone(),
         )));
-        // self.produce_hello_packet_handle = Some(tokio::spawn(handle::create_hello_packet_handle()));
+        self.produce_hello_packet_handle = Some(tokio::spawn(handle::create_hello_packet_handle(
+            inner_tx,
+            neighbors.clone(),
+            hello_interval as u64,
+            network_mask,
+            router_priority as u8,
+            router_dead_interval,
+            0,
+            router_id.to_bits(),
+            area_id.to_bits(),
+            auth_type as u8,
+        )));
         self.produce_dd_packet_handle = Some(tokio::spawn(handle::create_dd_packet_handle()));
         Ok(())
     }

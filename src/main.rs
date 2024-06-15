@@ -1,14 +1,6 @@
-use clap::Arg;
-use clap::Subcommand;
 use ospf_lib::interface;
 use ospf_lib::prompt_and_read;
 use ospf_lib::router;
-use pnet::datalink::Channel::Ethernet;
-use pnet::datalink::{self, NetworkInterface};
-use pnet::packet::dns::DnsTypes::A;
-use pnet::packet::ip::IpNextHeaderProtocols;
-use pnet::packet::Packet;
-use std::io::stdin;
 use std::net;
 use std::sync::Arc;
 use std::sync::Mutex;

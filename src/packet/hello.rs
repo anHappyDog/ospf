@@ -1,11 +1,7 @@
-use crate::{area, interface, neighbor, OSPF_VERSION_2};
+use crate::{interface, OSPF_VERSION_2};
 
 use super::{OspfPacket, OspfPacketHeader};
 
-use pnet::packet::ipv4::{Ipv4Packet, MutableIpv4Packet};
-use pnet::packet::{Packet, PacketSize};
-use pnet::transport::{transport_channel, TransportChannelType::Layer3};
-use pnet::{transport, util};
 use std::sync::{Arc, Mutex};
 use std::{mem, net};
 /// # struct HelloPacket
