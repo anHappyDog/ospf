@@ -13,7 +13,7 @@ use pnet::{
 use tokio::{sync::broadcast, task::JoinHandle, time};
 
 use crate::{
-    debug, interface,
+    debug, interface, ipv4_addr_to_bits,
     packet::{hello::HELLO_PACKET_TYPE, try_get_from_ipv4_packet, OspfPacket},
     prompt_and_read, router, AllSPFRouters, OSPF_VERSION_2,
 };
@@ -195,97 +195,6 @@ pub fn create_interfaces<'a>(
     Ok(ints)
 }
 
-async fn int_recv_packet<'a>(rx: &mut transport::TransportReceiver) -> u32 {
-    let mut recv_packet_count = 0;
-    let mut packet_iter = transport::ipv4_packet_iter(rx);
-
-    loop {
-        if let Ok((packet, _)) = packet_iter.next() {
-            if packet.get_dscp() == crate::OSPF_IP_PROTOCOL_NUMBER {
-                debug(&format!("recv ospf packet."));
-                let possible_neighbors = Arc::new(Mutex::new(Vec::new()));
-                let ospf_packet = try_get_from_ipv4_packet(&packet, possible_neighbors);
-                let ospf_packet = match ospf_packet {
-                    Ok(p) => p,
-                    Err(e) => {
-                        debug(&format!("recv packet, but not ospf packet.{}", e));
-                        continue;
-                    }
-                };
-                debug(&format!(
-                    "recv ospf [type is {}] packet",
-                    ospf_packet.lock().unwrap().get_type()
-                ));
-            } else {
-                debug(&format!("recv packet, but not ospf packet."));
-            }
-        } else {
-            debug(&format!("recv non-ipv4 packet."));
-            continue;
-        }
-        recv_packet_count += 1;
-    }
-
-    recv_packet_count
-}
-
-async fn int_send_packet<'a>(
-    tx: &mut transport::TransportSender,
-    hello_interval: u16,
-    ip_addr: net::Ipv4Addr,
-    router_id: u32,
-    area_id: u32,
-    auth_type: u8,
-    netwok_mask: net::Ipv4Addr,
-    router_priority: u8,
-    router_dead_interval: u32,
-    neighbors: Arc<Mutex<Vec<net::Ipv4Addr>>>,
-    network_type: InterfaceNetworkType,
-) -> u32 {
-    let mut send_packet_count = 0;
-    let hello_send_interval = time::Duration::from_secs(hello_interval as u64);
-    let default_ospf_header_length = size_of::<crate::packet::OspfPacketHeader>();
-    loop {
-        time::sleep(hello_send_interval).await;
-        let ospf_packet_header = crate::packet::OspfPacketHeader::new(
-            OSPF_VERSION_2,
-            HELLO_PACKET_TYPE,
-            default_ospf_header_length as u16,
-            router_id,
-            area_id,
-            0,
-            auth_type,
-            0,
-        );
-        let mut ospf_hello_packet = crate::packet::hello::HelloPacket::new(
-            netwok_mask,
-            hello_interval,
-            0,
-            router_priority,
-            router_dead_interval,
-            0,
-            0,
-            ospf_packet_header,
-            neighbors.clone(),
-        );
-        ospf_hello_packet.calculate_checksum();
-        match network_type {
-            InterfaceNetworkType::Broadcast => {
-                let _ = crate::packet::send_to(&ospf_hello_packet, tx, ip_addr, AllSPFRouters);
-            }
-            InterfaceNetworkType::PointToPoint => {
-                let _ = crate::packet::send_to(&ospf_hello_packet, tx, ip_addr, AllSPFRouters);
-            }
-            _ => {
-                break;
-            }
-        }
-        send_packet_count += 1;
-    }
-
-    send_packet_count
-}
-
 impl Interface {
     pub const INNER_PACKET_QUEUE_SIZE: u32 = 128;
 
@@ -338,8 +247,8 @@ impl Interface {
             router_priority as u8,
             router_dead_interval,
             0,
-            router_id.to_bits(),
-            area_id.to_bits(),
+            ipv4_addr_to_bits(router_id),
+            ipv4_addr_to_bits(area_id),
             auth_type as u8,
         )));
         self.produce_dd_packet_handle = Some(tokio::spawn(handle::create_dd_packet_handle()));
