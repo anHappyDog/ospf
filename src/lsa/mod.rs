@@ -5,6 +5,8 @@ use network::NETWORK_LINK_STATE_TYPE;
 use router::ROUTER_LINK_STATE_TYPE;
 use summary::{SUMMARY_LINK_STATE_TYPE_3, SUMMARY_LINK_STATE_TYPE_4};
 
+use crate::bits_to_ipv4_addr;
+
 pub mod as_external;
 pub mod network;
 pub mod router;
@@ -26,7 +28,7 @@ pub const MaxAgeDiff: u32 = 900;
 #[allow(non_upper_case_globals)]
 pub const LSInfinity: u32 = 0xffffff;
 #[allow(non_upper_case_globals)]
-pub const DefaultDesination: net::Ipv4Addr = net::Ipv4Addr::from_bits(0);
+pub const DefaultDesination: net::Ipv4Addr = bits_to_ipv4_addr(0);
 #[allow(non_upper_case_globals)]
 pub const InitialSequenceNumber: u32 = 0x7fffffff;
 

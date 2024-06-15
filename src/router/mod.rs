@@ -1,4 +1,3 @@
-
 use crate::rtable;
 use crate::{debug, interface};
 use std::collections::HashMap;
@@ -28,7 +27,12 @@ pub fn create_simulated_router(
             }
         }
     }
-    let router = Arc::new(Mutex::new(Router::new(net::Ipv4Addr::from_bits(router_id))));
+    let router = Arc::new(Mutex::new(Router::new(net::Ipv4Addr::new(
+        ((router_id >> 24) & 0xff) as u8,
+        ((router_id >> 16) & 0xff) as u8,
+        ((router_id >> 8) & 0xff) as u8,
+        (router_id & 0xff) as u8,
+    ))));
     for (_, interface) in &interfaces {
         let mut interface = interface.lock().unwrap();
         interface.router = router.clone();
