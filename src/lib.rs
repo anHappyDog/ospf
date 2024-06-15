@@ -22,6 +22,7 @@ pub const OSPF_VERSION_2: u8 = 2;
 pub const OSPF_IP_PROTOCOL_NUMBER: u8 = 89;
 pub const MTU: usize = 1500;
 
+
 pub fn prompt_and_read(prompt: &str) -> String {
     print!("{}", prompt);
     stdout().flush().unwrap();

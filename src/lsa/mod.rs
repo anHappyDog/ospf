@@ -4,8 +4,8 @@ use as_external::AS_EXTERNAL_LINK_STATE_TYPE;
 use network::NETWORK_LINK_STATE_TYPE;
 use router::ROUTER_LINK_STATE_TYPE;
 use summary::{SUMMARY_LINK_STATE_TYPE_3, SUMMARY_LINK_STATE_TYPE_4};
-
 use crate::bits_to_ipv4_addr;
+
 
 pub mod as_external;
 pub mod network;
