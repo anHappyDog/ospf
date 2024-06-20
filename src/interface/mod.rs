@@ -206,12 +206,12 @@ impl Interface {
         self.aread_id
     }
     /// init the interfaces' handlers
-    pub async fn init_handlers(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn init_handlers(
+        &mut self,
+        router_id: net::Ipv4Addr,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let hello_interval = self.hello_interval;
         let ip_addr = self.ip_addr;
-        let router = self.router.clone();
-        let router_id = router.lock().unwrap().get_router_id();
-
         let area_id = self.aread_id;
         let auth_type = self.auth_type;
         let network_type = self.network_type;

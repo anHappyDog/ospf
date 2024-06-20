@@ -52,7 +52,7 @@ impl Router {
         debug("Router initialized.");
         for (_, interface) in &self.interfaces {
             let mut interface = interface.lock().unwrap();
-            interface.init_handlers().await?;
+            interface.init_handlers(self.router_id).await?;
         }
         Ok(())
     }

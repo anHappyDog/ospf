@@ -15,5 +15,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         interface::create_interfaces(router.clone()).expect("No interface found in the machine.");
     // let mut router = router::create_simulated_router(interfaces);
     router.lock().unwrap().add_interfaces(interfaces);
+
+    let _ = router.lock().unwrap().init().await;
+    loop {
+        
+    }
     Ok(())
 }
