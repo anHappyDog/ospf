@@ -7,3 +7,5 @@ pub enum InterfaceEvent {
     UnloopInd,
     InterfaceDown,
 }
+
+impl InterfaceEvent {}

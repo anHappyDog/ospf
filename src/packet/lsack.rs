@@ -1,3 +1,5 @@
+use pnet::packet::ipv4::Ipv4Packet;
+
 use crate::lsa::LinkStateAdvertisementHeader;
 
 use super::{OspfPacket, OspfPacketHeader};
@@ -19,6 +21,9 @@ impl OspfPacket for LinkStateAcknowledgementPacket {
             result.extend(lsa_header.to_bytes());
         }
         result
+    }
+    fn ipv4packet(&self) -> Result<Ipv4Packet, &'static str> {
+        Err("not an ipv4 packet")
     }
     fn length(&self) -> usize {
         let mut length = 0;

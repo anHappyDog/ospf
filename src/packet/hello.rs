@@ -1,7 +1,11 @@
-use crate::{interface, OSPF_VERSION_2};
+use pnet::packet::ipv4::Ipv4Packet;
+
+use crate::neighbor::Neighbor;
+use crate::{interface, neighbor, OSPF_VERSION_2};
 
 use super::{OspfPacket, OspfPacketHeader};
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::{mem, net};
 /// # struct HelloPacket
@@ -16,7 +20,7 @@ pub struct HelloPacket {
     pub router_dead_interval: u32,
     pub designated_router: u32,
     pub backup_designated_router: u32,
-    pub neighbors: Arc<Mutex<Vec<net::Ipv4Addr>>>,
+    pub neighbors: Arc<Mutex<HashMap<net::Ipv4Addr, neighbor::Neighbor>>>,
 }
 
 pub const HELLO_PACKET_TYPE: u8 = 1;
@@ -35,8 +39,8 @@ impl OspfPacket for HelloPacket {
         bytes.extend_from_slice(&self.designated_router.to_be_bytes());
         bytes.extend_from_slice(&self.backup_designated_router.to_be_bytes());
         let neighbors = self.neighbors.lock().unwrap();
-        for neighbor in neighbors.iter() {
-            bytes.extend_from_slice(&neighbor.octets());
+        for (neighbor_ip, _) in neighbors.iter() {
+            bytes.extend_from_slice(&neighbor_ip.octets());
         }
         bytes
     }
@@ -56,13 +60,16 @@ impl OspfPacket for HelloPacket {
         bytes.extend_from_slice(&self.designated_router.to_be_bytes());
         bytes.extend_from_slice(&self.backup_designated_router.to_be_bytes());
         let neighbors = self.neighbors.lock().unwrap();
-        for neighbor in neighbors.iter() {
-            bytes.extend_from_slice(&neighbor.octets());
+        for (neighbor_ip, _) in neighbors.iter() {
+            bytes.extend_from_slice(&neighbor_ip.octets());
         }
         bytes
     }
     fn get_type(&self) -> u8 {
         HELLO_PACKET_TYPE
+    }
+    fn ipv4packet(&self) -> Result<Ipv4Packet, &'static str> {
+        Err("not an ipv4 packet")
     }
     fn length(&self) -> usize {
         let mut length = 0;
@@ -123,7 +130,7 @@ impl HelloPacket {
         designated_router: u32,
         backup_designated_router: u32,
         header: OspfPacketHeader,
-        neighbors: Arc<Mutex<Vec<net::Ipv4Addr>>>,
+        neighbors: Arc<Mutex<HashMap<net::Ipv4Addr, neighbor::Neighbor>>>,
     ) -> Self {
         HelloPacket {
             header,
@@ -137,7 +144,10 @@ impl HelloPacket {
             neighbors,
         }
     }
-    pub fn from_be_bytes(bytes: &[u8], neighbors: Arc<Mutex<Vec<net::Ipv4Addr>>>) -> Self {
+    pub fn from_be_bytes(
+        bytes: &[u8],
+        neighbors: Arc<Mutex<HashMap<net::Ipv4Addr, neighbor::Neighbor>>>,
+    ) -> Self {
         let header = OspfPacketHeader::from_be_bytes(&bytes[0..24]);
         let network_mask = net::Ipv4Addr::new(bytes[24], bytes[25], bytes[26], bytes[27]);
         let hello_interval = u16::from_be_bytes([bytes[28], bytes[29]]);
@@ -149,12 +159,16 @@ impl HelloPacket {
             u32::from_be_bytes([bytes[40], bytes[41], bytes[42], bytes[43]]);
         let mut locked_neighbors = neighbors.lock().unwrap();
         for i in 44..bytes.len() {
-            locked_neighbors.push(net::Ipv4Addr::new(
-                bytes[i],
-                bytes[i + 1],
-                bytes[i + 2],
-                bytes[i + 3],
-            ));
+            // locked_neighbors.push(net::Ipv4Addr::new(
+            //     bytes[i],
+            //     bytes[i + 1],
+            //     bytes[i + 2],
+            //     bytes[i + 3],
+            // ));
+            let neighbor_ip: net::Ipv4Addr =
+                net::Ipv4Addr::new(bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]);
+            let neighbor: neighbor::Neighbor = neighbor::Neighbor::new(neighbor_ip);
+            locked_neighbors.insert(neighbor_ip, neighbor);
         }
         drop(locked_neighbors);
         Self {
