@@ -5,6 +5,7 @@ use tokio::task::JoinHandle;
 pub mod event;
 pub mod status;
 
+
 pub struct Neighbor {
     pub ipv4_addr: net::Ipv4Addr,
     pub status: status::NeighborStatus,

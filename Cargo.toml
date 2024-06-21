@@ -17,7 +17,9 @@ path = "src/main.rs"
 bytes = "1.6.0"
 clap = "4.5.7"
 colored = "2.1.0"
+lazy_static = "1.4.0"
 pnet = "0.35.0"
+rustyline = {version= "14.0.0",features = ["derive"]}
 tokio = {version ="1.38.0", features = ["full"]}
 
 

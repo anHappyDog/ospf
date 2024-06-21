@@ -133,7 +133,9 @@ pub async fn recv_udp_packet_raw_handle(
                 IpNextHeaderProtocol(OSPF_IP_PROTOCOL_NUMBER) => {
                     crate::debug("interface received ospf udp packet.");
                     let neighbors = Arc::new(Mutex::new(HashMap::new()));
-                    if let Ok(ospf_packet) = packet::try_get_from_ipv4_packet(&packet, neighbors) {
+                    if let Ok(ospf_packet) =
+                        packet::try_get_from_ipv4_packet(&packet, neighbors.clone())
+                    {
                         crate::debug("interface received ospf udp packet and parse success.");
                         if !is_ospf_packet_valid(ospf_packet.as_ref()) {
                             crate::error("interface received ospf udp packet but checksum failed.");
@@ -141,8 +143,9 @@ pub async fn recv_udp_packet_raw_handle(
                         }
                         match ospf_packet.get_type() {
                             packet::hello::HELLO_PACKET_TYPE => {
-                                crate::debug("interface received hello packet.");
-                                
+                                crate::debug(
+                                    "interface received hello packet,try to update its neighbors",
+                                );
                             }
                             packet::dd::DATA_DESCRIPTION_PACKET_TYPE => {
                                 crate::debug("interface received dd packet.");

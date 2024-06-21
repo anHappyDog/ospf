@@ -204,6 +204,14 @@ pub fn create_interfaces<'a>(
 impl Interface {
     pub const INNER_PACKET_QUEUE_SIZE: u32 = 128;
 
+    pub fn update_neighbors(&mut self, new_neighbors: Arc<Mutex<HashMap<net::Ipv4Addr, Neighbor>>>) {
+        let mut locked_neighbors = self.neighbors.lock().unwrap();
+        let new_neighbors = new_neighbors.lock().unwrap();
+        for (k, v) in new_neighbors.iter() {
+            // locked_neighbors.insert(*k, v.clone());
+        }
+    }
+
     pub fn get_neighbors(&self) -> Arc<Mutex<HashMap<net::Ipv4Addr, Neighbor>>> {
         self.neighbors.clone()
     }
