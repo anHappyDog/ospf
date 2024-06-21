@@ -1,3 +1,5 @@
+use pnet::packet::ipv4::Ipv4Packet;
+
 use crate::lsa::LinkStateAdvertisementHeader;
 
 use super::{OspfPacket, OspfPacketHeader};
@@ -29,6 +31,9 @@ impl OspfPacket for DataDescriptionPacket {
         length += std::mem::size_of::<u32>();
         length += self.lsa_headers.len() * LinkStateAdvertisementHeader::length();
         length
+    }
+    fn ipv4packet(&self) -> Result<Ipv4Packet, &'static str> {
+        Err("not an ipv4 packet")
     }
     fn calculate_checksum(&mut self) {}
 

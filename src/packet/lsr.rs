@@ -1,3 +1,5 @@
+use pnet::packet::ipv4::Ipv4Packet;
+
 use super::{OspfPacket, OspfPacketHeader};
 
 pub struct LinkStatusRequest {
@@ -35,6 +37,9 @@ impl OspfPacket for LinkStateRequestPacket {
         length += OspfPacketHeader::length();
         length += self.lsrs.len() * LinkStatusRequest::length();
         length
+    }
+    fn ipv4packet(&self) -> Result<Ipv4Packet, &'static str> {
+        Err("not an ipv4 packet")
     }
     fn to_bytes(&self) -> Vec<u8> {
         let mut result = vec![];

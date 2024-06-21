@@ -5,16 +5,18 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use handle::recv_tcp_packet_raw_handle;
 use pnet::{
     datalink,
-    packet::ip::IpNextHeaderProtocols::Udp,
+    packet::ip::IpNextHeaderProtocols::{Tcp, Udp},
     transport::{self, TransportReceiver, TransportSender},
 };
 use tokio::{sync::broadcast, task::JoinHandle, time};
 
 use crate::{
-    debug, interface, ipv4_addr_to_bits,
-    packet::{hello::HELLO_PACKET_TYPE, try_get_from_ipv4_packet, OspfPacket},
+    interface, ipv4_addr_to_bits,
+    neighbor::Neighbor,
+    packet::{hello::HELLO_PACKET_TYPE, try_get_from_ipv4_packet, OspfPacket, OspfPacketHeader},
     prompt_and_read, router, AllSPFRouters, OSPF_VERSION_2,
 };
 pub mod event;
@@ -27,6 +29,7 @@ pub enum InterfaceNetworkType {
     PointToPoint,
     NBMA,
     PointToMultipoint,
+    VirtualLink,
 }
 
 impl std::fmt::Display for InterfaceNetworkType {
@@ -36,6 +39,7 @@ impl std::fmt::Display for InterfaceNetworkType {
             InterfaceNetworkType::PointToPoint => write!(f, "PointToPoint"),
             InterfaceNetworkType::NBMA => write!(f, "NBMA"),
             InterfaceNetworkType::PointToMultipoint => write!(f, "PointToMultipoint"),
+            InterfaceNetworkType::VirtualLink => write!(f, "VirtualLink"),
         }
     }
 }
@@ -47,6 +51,7 @@ impl std::fmt::Debug for InterfaceNetworkType {
             InterfaceNetworkType::PointToPoint => write!(f, "PointToPoint"),
             InterfaceNetworkType::NBMA => write!(f, "NBMA"),
             InterfaceNetworkType::PointToMultipoint => write!(f, "PointToMultipoint"),
+            InterfaceNetworkType::VirtualLink => write!(f, "VirtualLink"),
         }
     }
 }
@@ -73,8 +78,9 @@ pub struct Interface {
     pub recv_packet_handle: Option<JoinHandle<()>>,
     pub produce_hello_packet_handle: Option<JoinHandle<()>>,
     pub produce_dd_packet_handle: Option<JoinHandle<()>>,
-    pub neighbors: Arc<Mutex<Vec<net::Ipv4Addr>>>,
+    pub neighbors: Arc<Mutex<HashMap<net::Ipv4Addr, Neighbor>>>,
     pub router: Arc<Mutex<crate::router::Router>>,
+    pub status: status::InterfaceStatus,
 }
 
 pub const DEFAULT_HELLO_INTERVAL: u32 = 10;
@@ -198,7 +204,7 @@ pub fn create_interfaces<'a>(
 impl Interface {
     pub const INNER_PACKET_QUEUE_SIZE: u32 = 128;
 
-    pub fn get_neighbors(&self) -> Arc<Mutex<Vec<net::Ipv4Addr>>> {
+    pub fn get_neighbors(&self) -> Arc<Mutex<HashMap<net::Ipv4Addr, Neighbor>>> {
         self.neighbors.clone()
     }
 
@@ -210,48 +216,47 @@ impl Interface {
         &mut self,
         router_id: net::Ipv4Addr,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let hello_interval = self.hello_interval;
-        let ip_addr = self.ip_addr;
+        let hello_interval = self.hello_interval as u16;
+        let options = 0;
         let area_id = self.aread_id;
-        let auth_type = self.auth_type;
-        let network_type = self.network_type;
         let network_mask = self.network_mask;
-        let router_priority = self.router_priority;
+        let router_priority = self.router_priority as u8;
         let router_dead_interval = self.router_dead_interval;
-        let neighbors: Arc<Mutex<Vec<net::Ipv4Addr>>> = self.neighbors.clone();
+        let neighbors = self.neighbors.clone();
 
-        let (trans_tx, trans_rx) =
+        let (udp_tx, udp_rx) =
             transport::transport_channel(1500, transport::TransportChannelType::Layer3(Udp))
                 .unwrap();
-
-        let (inner_tx, inner_rx) = broadcast::channel::<Arc<Mutex<dyn OspfPacket + Send>>>(
-            Interface::INNER_PACKET_QUEUE_SIZE as usize,
-        );
-
-        self.send_packet_handle = Some(tokio::spawn(handle::create_send_packet_handle(
-            inner_rx,
-            trans_tx,
-            ip_addr,
-            AllSPFRouters,
-            network_type,
-        )));
-        self.recv_packet_handle = Some(tokio::spawn(handle::create_recv_packet_handle(
-            trans_rx,
-            inner_tx.clone(),
-        )));
-        self.produce_hello_packet_handle = Some(tokio::spawn(handle::create_hello_packet_handle(
-            inner_tx,
-            neighbors.clone(),
-            hello_interval as u64,
+        let (tcp_tx, tcp_rx) =
+            transport::transport_channel(1500, transport::TransportChannelType::Layer3(Tcp))
+                .unwrap();
+        let (send_tcp_tx, send_tcp_rx) = broadcast::channel::<bytes::Bytes>(128);
+        let (send_udp_tx, send_udp_rx) = broadcast::channel::<bytes::Bytes>(128);
+        tokio::spawn(handle::send_tcp_packet_raw_handle(send_tcp_rx, tcp_tx));
+        tokio::spawn(handle::send_udp_packet_raw_handle(send_udp_rx, udp_tx));
+        tokio::spawn(handle::recv_tcp_packet_raw_handle(
+            send_tcp_tx.clone(),
+            tcp_rx,
+        ));
+        tokio::spawn(handle::recv_udp_packet_raw_handle(
+            send_udp_tx.clone(),
+            udp_rx,
+        ));
+        tokio::spawn(handle::create_hello_packet_raw_handle(
+            send_udp_tx.clone(),
+            hello_interval,
             network_mask,
-            router_priority as u8,
+            options,
+            router_id.into(),
+            area_id.into(),
+            router_priority,
             router_dead_interval,
             0,
-            ipv4_addr_to_bits(router_id),
-            ipv4_addr_to_bits(area_id),
-            auth_type as u8,
-        )));
-        self.produce_dd_packet_handle = Some(tokio::spawn(handle::create_dd_packet_handle()));
+            0,
+            self.ip_addr,
+            AllSPFRouters,
+            neighbors,
+        ));
         Ok(())
     }
     pub fn from_pnet_interface(
@@ -381,12 +386,13 @@ impl Interface {
             recv_packet_handle: None,
             produce_dd_packet_handle: None,
             produce_hello_packet_handle: None,
-            neighbors: Arc::new(Mutex::new(Vec::new())),
+            neighbors: Arc::new(Mutex::new(HashMap::new())),
             router: router,
             inner_tx,
             inner_rx,
             trans_rx,
             trans_tx,
+            status: status::InterfaceStatus::Down,
         }
     }
 }

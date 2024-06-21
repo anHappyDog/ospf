@@ -6,11 +6,13 @@ pub mod lsu;
 
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv4::{Ipv4Packet, MutableIpv4Packet};
-use pnet::packet::{Packet};
-use pnet::{transport};
+use pnet::packet::Packet;
+use pnet::transport;
+use std::collections::HashMap;
 use std::net;
 use std::sync::{Arc, Mutex};
 
+use crate::neighbor::Neighbor;
 use crate::{OSPF_IP_PROTOCOL_NUMBER, OSPF_VERSION_2};
 
 #[derive(Clone, Copy)]
@@ -107,7 +109,7 @@ impl OspfPacketHeader {
 }
 
 // please remember that in ospf the packket must not and does not have to be sliced.
-pub(self) fn new_ip_packets(
+pub fn new_ip_packet(
     buffer: &mut [u8],
     src_ip: net::Ipv4Addr,
     dst_ip: net::Ipv4Addr,
@@ -130,8 +132,8 @@ pub(self) fn new_ip_packets(
 
 pub fn try_get_from_ipv4_packet(
     ip_packet: &Ipv4Packet,
-    hello_neighbors: Arc<Mutex<Vec<net::Ipv4Addr>>>,
-) -> Result<Arc<Mutex<dyn OspfPacket + Send>>, &'static str> {
+    hello_neighbors: Arc<Mutex<HashMap<net::Ipv4Addr, Neighbor>>>,
+) -> Result<Box<dyn OspfPacket + Send>, &'static str> {
     if ip_packet.get_dscp() != OSPF_IP_PROTOCOL_NUMBER {
         return Err("not an ospf packet");
     }
@@ -142,22 +144,23 @@ pub fn try_get_from_ipv4_packet(
     if ospf_packet[0] != OSPF_VERSION_2 {
         return Err("not an ospf version 2 packet");
     }
-    let ospf_packet: Arc<Mutex<dyn OspfPacket + Send>> = match ospf_packet[1] {
-        crate::packet::hello::HELLO_PACKET_TYPE => Arc::new(Mutex::new(
-            hello::HelloPacket::from_be_bytes(ospf_packet, hello_neighbors),
+    let ospf_packet: Box<dyn OspfPacket + Send> = match ospf_packet[1] {
+        crate::packet::hello::HELLO_PACKET_TYPE => Box::new(hello::HelloPacket::from_be_bytes(
+            ospf_packet,
+            hello_neighbors,
         )),
-        crate::packet::dd::DATA_DESCRIPTION_PACKET_TYPE => Arc::new(Mutex::new(
-            dd::DataDescriptionPacket::from_be_bytes(ospf_packet),
-        )),
-        crate::packet::lsr::LINK_STATE_REQUEST_PACKET_TYPE => Arc::new(Mutex::new(
-            lsr::LinkStateRequestPacket::from_be_bytes(ospf_packet),
-        )),
-        crate::packet::lsack::LINK_STATE_ACKNOWLEDGEMENT_PACKET_TYPE => Arc::new(Mutex::new(
+        crate::packet::dd::DATA_DESCRIPTION_PACKET_TYPE => {
+            Box::new(dd::DataDescriptionPacket::from_be_bytes(ospf_packet))
+        }
+        crate::packet::lsr::LINK_STATE_REQUEST_PACKET_TYPE => {
+            Box::new(lsr::LinkStateRequestPacket::from_be_bytes(ospf_packet))
+        }
+        crate::packet::lsack::LINK_STATE_ACKNOWLEDGEMENT_PACKET_TYPE => Box::new(
             lsack::LinkStateAcknowledgementPacket::from_be_bytes(ospf_packet),
-        )),
-        crate::packet::lsu::LINK_STATE_UPDATE_TYPE => Arc::new(Mutex::new(
-            lsu::LinkStateUpdatePacket::from_be_bytes(ospf_packet),
-        )),
+        ),
+        crate::packet::lsu::LINK_STATE_UPDATE_TYPE => {
+            Box::new(lsu::LinkStateUpdatePacket::from_be_bytes(ospf_packet))
+        }
         _ => return Err("unknown packet type"),
     };
     Ok(ospf_packet)
@@ -169,18 +172,23 @@ pub trait OspfPacket {
     fn to_be_bytes(&self) -> Vec<u8>;
     fn calculate_checksum(&mut self);
     fn get_type(&self) -> u8;
+    fn ipv4packet(&self) -> Result<Ipv4Packet, &'static str>;
 }
 
-pub fn send_to(
-    ospf_packet: &dyn OspfPacket,
-    tx: &mut transport::TransportSender,
-    src_ip: net::Ipv4Addr,
-    dst_ip: net::Ipv4Addr,
-) -> Result<(), &'static str> {
-    let mut buffer = vec![0; ospf_packet.length() + 20];
-    let ip_packet = new_ip_packets(&mut buffer, src_ip, dst_ip, ospf_packet.to_be_bytes())
-        .expect("create ip packet failed");
-    tx.send_to(ip_packet, net::IpAddr::V4(dst_ip))
-        .expect("send packet failed");
-    Ok(())
+pub fn is_ip_packet_valid(packet: &Ipv4Packet) -> bool {
+    true
+}
+
+pub fn is_ospf_packet_valid(ospf_packet: &dyn OspfPacket) -> bool {
+    let mut ospf_packet = ospf_packet.to_bytes();
+    let checksum = u16::from_be_bytes([ospf_packet[12], ospf_packet[13]]);
+    ospf_packet[12] = 0;
+    ospf_packet[13] = 0;
+    let calculated_checksum = calculate_checksum(
+        &ospf_packet
+            .chunks(2)
+            .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+            .collect::<Vec<u16>>(),
+    );
+    checksum == calculated_checksum
 }
