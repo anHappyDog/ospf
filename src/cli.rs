@@ -16,11 +16,15 @@ lazy_static::lazy_static! {
     .arg(Arg::new("interface").help("Interface name").required(true));
     static ref INTERFACE_LIST_COMMAND : Command = Command::new("list")
     .about("List all interfaces");
+    static ref INTERFACE_DISPLAY_COMMAND : Command = Command::new("display")
+    .about("Display interface")
+    .arg(Arg::new("interface").help("Interface name").required(true));
     static ref INTERFACE_COMMAND : Command =  Command::new("interface")
     .about("Interface commands")
     .subcommand(INTERFACE_UP_COMMAND.clone())
     .subcommand(INTERFACE_DOWN_COMMAND.clone())
-    .subcommand(INTERFACE_LIST_COMMAND.clone());
+    .subcommand(INTERFACE_LIST_COMMAND.clone())
+    .subcommand(INTERFACE_DISPLAY_COMMAND.clone());
     static ref EXIT_COMMAND : Command = Command::new("exit")
     .about("Exit the ospf cli");
     static ref OSPF_COMMAND : Command =  Command::new("ospf")
@@ -59,12 +63,19 @@ fn match_ospf_command(line: &str) {
 fn match_interface_subcommand(args_match: &ArgMatches) {
     if let Some(sub_command_matches) = args_match.subcommand_matches("up") {
         let interface = sub_command_matches.get_one::<String>("interface").unwrap();
-        println!("Interface up: {}", interface);
+        ospf_lib::debug(&format!("Interface up: {}", interface));
+        ospf_lib::interface::turn_on_interface(interface);
     } else if let Some(sub_command_matches) = args_match.subcommand_matches("down") {
         let interface = sub_command_matches.get_one::<String>("interface").unwrap();
-        println!("Interface down: {}", interface);
+        ospf_lib::debug(&format!("Interface down: {}", interface));
+        ospf_lib::interface::turn_down_interface(interface);
     } else if let Some(_) = args_match.subcommand_matches("list") {
-        println!("List all interfaces");
+        ospf_lib::debug("List all interfaces");
+        ospf_lib::interface::list_interfaces();
+    } else if let Some(sub_command_matches) = args_match.subcommand_matches("display") {
+        let interface = sub_command_matches.get_one::<String>("interface").unwrap();
+        ospf_lib::debug(&format!("Display interface: {}", interface));
+        ospf_lib::interface::display_interface(interface);
     } else {
         INTERFACE_COMMAND
             .clone()

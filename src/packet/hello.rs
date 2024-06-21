@@ -91,13 +91,19 @@ impl HelloPacket {
         self.header.authentication = auth_key.to_be_bytes();
     }
 
-    pub fn new_from_interface(interface: Arc<Mutex<interface::Interface>>) -> Self {
-        let interface = interface.lock().unwrap();
+    pub fn new_from_interface(
+        ip_addr: net::Ipv4Addr,
+        area_id: net::Ipv4Addr,
+        network_mask: net::Ipv4Addr,
+        hello_interval: u16,
+    ) -> Self {
+        let global_neighbors = crate::NEIGHBORS.clone();
+        let locked_neighbors = global_neighbors.lock().unwrap();
+        let neighbors = locked_neighbors
+            .get(&ip_addr)
+            .expect("get neighbors from new hello packet failed.");
+        let router_id = crate::ROUTER_ID.clone();
 
-        let router = interface.router.lock().unwrap();
-        let router_id = router.get_router_id();
-        let area_id = interface.get_area_id();
-        let hello_interval = interface.hello_interval as u16;
         let header = OspfPacketHeader::new(
             OSPF_VERSION_2,
             HELLO_PACKET_TYPE,
@@ -110,14 +116,14 @@ impl HelloPacket {
         );
         HelloPacket {
             header,
-            network_mask: interface.network_mask,
+            network_mask,
             hello_interval: hello_interval,
             options: 0,
             rtr_pri: 0,
             router_dead_interval: 0,
             designated_router: 0,
             backup_designated_router: 0,
-            neighbors: interface.neighbors.clone(),
+            neighbors: neighbors.clone(),
         }
     }
 

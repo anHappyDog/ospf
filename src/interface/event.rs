@@ -2,7 +2,7 @@ pub enum InterfaceEvent {
     InterfaceUp,
     WaitTimer,
     BackupSeen,
-    NeighborChange,
+    NeighborChange(super::status::InterfaceStatus),
     LoopInd,
     UnloopInd,
     InterfaceDown,

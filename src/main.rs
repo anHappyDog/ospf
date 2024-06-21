@@ -15,12 +15,8 @@ mod cli;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let router_id = prompt_and_read("please enter router id:")
-        .parse::<net::Ipv4Addr>()
-        .unwrap();
-    let router = Arc::new(Mutex::new(router::Router::new(router_id)));
-
-    let _ = cli::cli(router_id);
+    ospf_lib::init();
+    let _ = cli::cli(ospf_lib::ROUTER_ID.clone());
 
     // let router_id = prompt_and_read("please enter router id:")
     //     .parse::<net::Ipv4Addr>()
