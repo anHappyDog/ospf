@@ -1,28 +1,10 @@
 use clap::{Arg, ArgMatches, Command};
-use ospf_lib::router;
 use rustyline::{
-    history::{History, MemHistory},
     Completer, CompletionType, Config, Editor, Helper, Highlighter, Hinter, Validator,
 };
 use std::net;
-use std::sync::{Arc, Mutex};
 #[derive(Helper, Hinter, Validator, Highlighter, Completer)]
 struct OspfHelper;
-
-// impl Helper for OspfHelper {
-
-// }
-
-// impl Hinter for OspfHelper {
-// }
-
-// impl Validator for OspfHelper {}
-
-// impl Highlighter for OspfHelper {}
-
-// impl Completer for OspfHelper {
-//     type Candidate = String;
-// }
 
 lazy_static::lazy_static! {
 
@@ -58,8 +40,7 @@ fn match_ospf_command(line: &str) {
         Ok(matches) => {
             if let Some(sub_command_matches) = matches.subcommand_matches("interface") {
                 match_interface_subcommand(sub_command_matches);
-            }
-            else if let Some(_) = matches.subcommand_matches("exit") {
+            } else if let Some(_) = matches.subcommand_matches("exit") {
                 println!("Bye");
                 std::process::exit(0);
             } else {
@@ -79,12 +60,10 @@ fn match_interface_subcommand(args_match: &ArgMatches) {
     if let Some(sub_command_matches) = args_match.subcommand_matches("up") {
         let interface = sub_command_matches.get_one::<String>("interface").unwrap();
         println!("Interface up: {}", interface);
-    }
-    else if let Some(sub_command_matches) = args_match.subcommand_matches("down") {
+    } else if let Some(sub_command_matches) = args_match.subcommand_matches("down") {
         let interface = sub_command_matches.get_one::<String>("interface").unwrap();
         println!("Interface down: {}", interface);
-    }
-    else if let Some(_) = args_match.subcommand_matches("list") {
+    } else if let Some(_) = args_match.subcommand_matches("list") {
         println!("List all interfaces");
     } else {
         INTERFACE_COMMAND
