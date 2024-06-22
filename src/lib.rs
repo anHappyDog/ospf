@@ -25,7 +25,6 @@ pub mod interface;
 pub mod lsa;
 pub mod neighbor;
 pub mod packet;
-pub mod router;
 pub mod rtable;
 
 #[allow(non_upper_case_globals)]
@@ -89,11 +88,13 @@ fn input_router_id() -> net::Ipv4Addr {
 }
 
 lazy_static::lazy_static! {
-    pub static ref INTERFACES : Arc<Mutex<HashMap<net::IpAddr,interface::Interface>>> = Arc::new(Mutex::new(HashMap::new()));
-    pub static ref INTERFACE_TRANSMISSION : Arc<Mutex<HashMap<net::IpAddr,InterfaceTransmission>>> = Arc::new(Mutex::new(HashMap::new()));
     pub static ref ROUTER_ID : net:: Ipv4Addr = input_router_id();
     pub static ref ROUTER_TABLE : Arc<Mutex<Vec<rtable::RouteTable>>> = Arc::new(Mutex::new(Vec::new()));
-    pub static ref NEIGHBORS : Arc<Mutex<HashMap<net::Ipv4Addr,Arc<Mutex<HashMap<net::Ipv4Addr,Neighbor>>>>>> = Arc::new(Mutex::new(HashMap::new()));
+    pub static ref INTERFACES : Arc<Mutex<HashMap<net::IpAddr,Arc<Mutex<interface::Interface>>>>> = Arc::new(Mutex::new(HashMap::new()));
+    pub static ref INTERFACES_BY_NAME : Arc<Mutex<HashMap<String,Arc<Mutex<interface::Interface>>>>> = Arc::new(Mutex::new(HashMap::new()));
+    pub static ref INTERFACE_TRANSMISSION : Arc<Mutex<HashMap<net::IpAddr,InterfaceTransmission>>> = Arc::new(Mutex::new(HashMap::new()));
+    pub static ref NEIGHBORS : Arc<Mutex<HashMap<net::IpAddr,Arc<Mutex<HashMap<net::Ipv4Addr,Neighbor>>>>>> = Arc::new(Mutex::new(HashMap::new()));
+    pub static ref INTERFACE_HANDLERS : Arc<Mutex<HashMap<net::IpAddr,Arc<Mutex<interface::handle::InterfaceHandler>> >>> = Arc::new(Mutex::new(HashMap::new()));
 }
 
 pub fn init() {
@@ -107,22 +108,16 @@ pub fn init() {
         .lock()
         .expect("interface transmission lock error");
     for (ip, _) in locked_interfaces.iter() {
-        let (tcp_tx, tcp_rx) =
-            transport::transport_channel(MTU, transport::TransportChannelType::Layer3(Tcp))
-                .expect("tcp channel error");
-        let (udp_tx, udp_rx) =
-            transport::transport_channel(MTU, transport::TransportChannelType::Layer3(Udp))
-                .expect("udp channel error");
-        let (inner_tx, inner_rx) = broadcast::channel(128);
+        let (tcp_inner_tx, tcp_inner_rx) = broadcast::channel(128);
+        let (udp_inner_tx, udp_inner_rx) = broadcast::channel(128);
+
         locked_interface_transmission.insert(
             *ip,
             InterfaceTransmission {
-                tcp_tx,
-                tcp_rx,
-                udp_tx,
-                udp_rx,
-                inner_tx,
-                inner_rx,
+                tcp_inner_tx,
+                tcp_inner_rx,
+                udp_inner_tx,
+                udp_inner_rx,
             },
         );
     }

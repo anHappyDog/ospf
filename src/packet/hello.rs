@@ -164,18 +164,21 @@ impl HelloPacket {
         let backup_designated_router =
             u32::from_be_bytes([bytes[40], bytes[41], bytes[42], bytes[43]]);
         let mut locked_neighbors = neighbors.lock().unwrap();
-        for i in 44..bytes.len() {
-            // locked_neighbors.push(net::Ipv4Addr::new(
-            //     bytes[i],
-            //     bytes[i + 1],
-            //     bytes[i + 2],
-            //     bytes[i + 3],
-            // ));
-            let neighbor_ip: net::Ipv4Addr =
-                net::Ipv4Addr::new(bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]);
-            let neighbor: neighbor::Neighbor = neighbor::Neighbor::new(neighbor_ip);
-            locked_neighbors.insert(neighbor_ip, neighbor);
-        }
+        // for i in 44..bytes.len() {
+        //     let neighbor_ip: net::Ipv4Addr =
+        //         net::Ipv4Addr::new(bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]);
+            
+        //     let neighbor: neighbor::Neighbor = neighbor::Neighbor{
+        //         ipv4_addr: neighbor_ip,
+        //         status: neighbor::status::NeighborStatus::Down,
+        //         dead_timer: None,
+        //         neighbor_id: 0,
+        //         neighbor_priority: 0,
+        //         neighbor_designated_router: 0,
+        //         neighbor_backup_designated_router: 0,
+        //     };
+        //     locked_neighbors.insert(neighbor_ip, neighbor);
+        // }
         drop(locked_neighbors);
         Self {
             header,

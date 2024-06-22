@@ -2,7 +2,6 @@ use std::{
     collections::HashMap,
     net,
     sync::{Arc, Mutex},
-    thread::JoinHandle,
 };
 
 use pnet::{
@@ -13,7 +12,7 @@ use pnet::{
     },
     transport::{self, ipv4_packet_iter},
 };
-use tokio::{sync::broadcast, time};
+use tokio::{sync::broadcast, task::JoinHandle, time};
 
 use crate::{
     error,
@@ -23,30 +22,34 @@ use crate::{
     OSPF_IP_PROTOCOL_NUMBER, OSPF_VERSION_2,
 };
 
-pub enum OpsfHandleType {
-    SendTcpPacket,
-    RecvTcpPacket,
-    SendUdpPacket,
-    RecvUdpPacket,
-    CreateHelloPacket,
-    CreateDataDescriptionPacket,
+pub struct InterfaceHandler {
+    pub send_tcp_packet_handle: Option<JoinHandle<()>>,
+    pub recv_tcp_packet_handle: Option<JoinHandle<()>>,
+    pub send_udp_packet_handle: Option<JoinHandle<()>>,
+    pub recv_udp_packet_handle: Option<JoinHandle<()>>,
+    pub hello_timer_handle: Option<JoinHandle<()>>,
+    pub dd_timer_handle: Option<JoinHandle<()>>,
+    pub wait_timer_handle: Option<JoinHandle<()>>,
 }
 
-pub struct OspfHandle<T> {
-    pub raw_handle: JoinHandle<T>,
-    pub handle_type: OpsfHandleType,
+pub fn add_interface_handlers(ip_addr: net::IpAddr) -> Arc<Mutex<InterfaceHandler>> {
+    let interface_handlers = crate::INTERFACE_HANDLERS.clone();
+    let mut locked_interface_handlers = interface_handlers.lock().unwrap();
+
+    let handlers = Arc::new(Mutex::new(InterfaceHandler {
+        send_tcp_packet_handle: None,
+        recv_tcp_packet_handle: None,
+        send_udp_packet_handle: None,
+        recv_udp_packet_handle: None,
+        hello_timer_handle: None,
+        dd_timer_handle: None,
+        wait_timer_handle: None,
+    }));
+    locked_interface_handlers.insert(ip_addr, handlers.clone());
+    handlers
 }
 
-impl<T> OspfHandle<T> {
-    pub fn new(raw_handle: JoinHandle<T>, handle_type: OpsfHandleType) -> Self {
-        Self {
-            raw_handle,
-            handle_type,
-        }
-    }
-}
-
-pub async fn send_tcp_packet_raw_handle(
+pub async fn send_tcp_packet(
     mut to_send_tcp_packet_rx: broadcast::Receiver<bytes::Bytes>,
     mut tcp_ip_packet_tx: transport::TransportSender,
 ) {
@@ -68,15 +71,15 @@ pub async fn send_tcp_packet_raw_handle(
     }
 }
 
-pub async fn send_udp_packet_raw_handle(
+pub async fn send_udp_packet(
     mut to_send_udp_packet_rx: broadcast::Receiver<bytes::Bytes>,
-    mut udp_ip_packet_tx: transport::TransportSender,
+    mut udp_tx: transport::TransportSender,
 ) {
     loop {
         if let Ok(packet_bytes) = to_send_udp_packet_rx.recv().await {
             if let Some(packet) = Ipv4Packet::new(&packet_bytes) {
                 let destination = packet.get_destination();
-                if let Ok(_) = udp_ip_packet_tx.send_to(packet, net::IpAddr::V4(destination)) {
+                if let Ok(_) = udp_tx.send_to(packet, net::IpAddr::V4(destination)) {
                     crate::debug("interface sending the udp-sending packet success.");
                 } else {
                     crate::error("interface sending the udp-sending packet failed.");
@@ -90,7 +93,7 @@ pub async fn send_udp_packet_raw_handle(
     }
 }
 
-pub async fn recv_tcp_packet_raw_handle(
+pub async fn recv_tcp_packet(
     mut to_send_tcp_packet_tx: broadcast::Sender<bytes::Bytes>,
     mut tcp_ip_packet_rx: transport::TransportReceiver,
 ) {
@@ -112,12 +115,12 @@ pub async fn recv_tcp_packet_raw_handle(
     }
 }
 ///
-/// # recv_udp_packet_raw_handle
+/// # recv_udp_packet
 ///this function is used to handle the received udp packet from the interface.
 ///it can receive udp and tcp packet, if received ospf packet, then handle it.
 ///otherwise, just forwarding it or receive it.
 ///
-pub async fn recv_udp_packet_raw_handle(
+pub async fn recv_udp_packet(
     mut to_send_udp_packet_tx: broadcast::Sender<bytes::Bytes>,
     mut udp_ip_packet_rx: transport::TransportReceiver,
 ) {
@@ -179,49 +182,71 @@ pub async fn recv_udp_packet_raw_handle(
     }
 }
 
-pub async fn create_hello_packet_raw_handle(
+pub async fn create_wait_timer(router_dead_interval: u32) {
+    let duration = time::Duration::from_secs(router_dead_interval as u64);
+    time::sleep(duration).await;
+}
+
+pub async fn create_hello_packet(
     send_packet_tx: broadcast::Sender<bytes::Bytes>,
-    hello_interval: u16,
-    network_mask: net::Ipv4Addr,
-    options: u8,
-    router_id: u32,
-    area_id: u32,
-    router_priority: u8,
-    router_dead_interval: u32,
-    designated_router: u32,
-    backup_designated_router: u32,
-    src_ip: net::Ipv4Addr,
+    ip_addr: net::Ipv4Addr,
     dst_ip: net::Ipv4Addr,
-    neighbors: Arc<Mutex<HashMap<net::Ipv4Addr, neighbor::Neighbor>>>,
 ) {
+    let interfaces = crate::INTERFACES.clone();
+    let locked_interfaces = interfaces.lock().unwrap();
+    let interface = locked_interfaces
+        .get(&ip_addr.into())
+        .expect("get interface failed.");
+    let locked_interface = interface.lock().expect("get interface lock failed.");
+    let hello_interval = locked_interface.hello_interval;
+    let router_id = crate::ROUTER_ID.clone();
+    let area_id = locked_interface.aread_id;
+    let network_mask = locked_interface.network_mask;
+    let options = 0;
+    let router_priority = locked_interface.router_priority;
+    let router_dead_interval = locked_interface.router_dead_interval;
     let duration = time::Duration::from_secs(hello_interval as u64);
+    drop(locked_interface);
+    drop(locked_interfaces);
     let ospf_packet_header = packet::OspfPacketHeader::new(
         OSPF_VERSION_2,
         packet::hello::HELLO_PACKET_TYPE,
         packet::OspfPacketHeader::length() as u16,
-        router_id,
-        area_id,
+        router_id.into(),
+        area_id.into(),
         0,
         0,
         0,
     );
     loop {
         time::sleep(duration).await;
+        let interfaces = crate::INTERFACES.clone();
+        let locked_interfaces = interfaces.lock().unwrap();
+        let interface = locked_interfaces
+            .get(&ip_addr.into())
+            .expect("get interface failed.");
+        let locked_interface = interface.lock().expect("get interface lock failed.");
+        let designated_router = locked_interface.designated_router;
+        let backup_designated_router = locked_interface.backup_designated_router;
+        let neighbors = crate::NEIGHBORS.clone();
+        let locked_neighbors = neighbors.lock().unwrap();
+        let interface_neighbors = locked_neighbors.get(&ip_addr).unwrap();
+
         let hello_ospf_packet = packet::hello::HelloPacket::new(
             network_mask,
-            hello_interval,
+            hello_interval as u16,
             options,
-            router_priority,
+            router_priority as u8,
             router_dead_interval,
-            designated_router,
-            backup_designated_router,
+            designated_router.into(),
+            backup_designated_router.into(),
             ospf_packet_header,
-            neighbors.clone(),
+            interface_neighbors.clone(),
         );
-        let mut ip_packet_buffer = vec![0u8; 1500];
+        let mut ip_packet_buffer = vec![0u8; crate::MTU];
         let ip_packet = new_ip_packet(
             ip_packet_buffer.as_mut_slice(),
-            src_ip,
+            ip_addr,
             dst_ip,
             hello_ospf_packet.to_bytes(),
         );
@@ -238,4 +263,4 @@ pub async fn create_hello_packet_raw_handle(
     }
 }
 
-pub async fn create_dd_packet_raw_handle() {}
+pub async fn create_dd_packet() {}

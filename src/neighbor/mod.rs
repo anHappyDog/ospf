@@ -5,22 +5,21 @@ use tokio::task::JoinHandle;
 pub mod event;
 pub mod status;
 
-
 pub struct Neighbor {
     pub ipv4_addr: net::Ipv4Addr,
     pub status: status::NeighborStatus,
     pub dead_timer: Option<JoinHandle<()>>,
+    pub neighbor_id: net::Ipv4Addr,
+    pub neighbor_priority: u8,
+    pub neighbor_designated_router: net::Ipv4Addr,
+    pub neighbor_backup_designated_router: net::Ipv4Addr,
 }
 
 unsafe impl Send for Neighbor {}
 unsafe impl Sync for Neighbor {}
 
 impl Neighbor {
-    pub fn new(ipv4_addr: net::Ipv4Addr) -> Self {
-        Self {
-            ipv4_addr,
-            status: status::NeighborStatus::Down,
-            dead_timer: None,
-        }
+    pub fn change_to(&mut self, event: event::NeighborEvent) {
+        
     }
 }
