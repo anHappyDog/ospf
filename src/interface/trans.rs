@@ -19,3 +19,18 @@ lazy_static::lazy_static! {
     /// the key is the ipv4 address of the interface
     pub static ref TRANSMISSIONS : Arc<RwLock<HashMap<net::Ipv4Addr, Arc<RwLock<Transmission>>>>> = Arc::new(RwLock::new(HashMap::new()));
 }
+
+pub async fn init_transmissions(ipv4_addrs: Vec<net::Ipv4Addr>) {
+    for ipv4_addr in ipv4_addrs {
+        let (inner_tcp_tx, _) = broadcast::channel(1024);
+        let (inner_udp_tx, _) = broadcast::channel(1024);
+        let transmission = Transmission {
+            inner_tcp_tx,
+            inner_udp_tx,
+        };
+        TRANSMISSIONS
+            .write()
+            .await
+            .insert(ipv4_addr, Arc::new(RwLock::new(transmission)));
+    }
+}

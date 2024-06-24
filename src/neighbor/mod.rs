@@ -5,7 +5,6 @@ use tokio::{sync::RwLock, task::JoinHandle};
 pub mod event;
 pub mod status;
 
-
 /// # Neighbor
 /// the data structure is used to store the neighbor for the interface
 pub struct Neighbor {
@@ -31,4 +30,13 @@ lazy_static::lazy_static! {
     /// NEIGHBORS is a data structure used to store the neighbors for the interface
     /// it uses the interface's ipv4_addr to index its neighbors.
     pub static ref NEIGHBORS : Arc<RwLock<HashMap<net::Ipv4Addr, Arc<RwLock<HashMap<net::Ipv4Addr,Neighbor>>>>>> = Arc::new(RwLock::new(HashMap::new()));
+}
+
+pub async fn init_neighbors(ipv4_addrs: Vec<net::Ipv4Addr>) {
+    for ipv4_addr in ipv4_addrs {
+        NEIGHBORS
+            .write()
+            .await
+            .insert(ipv4_addr, Arc::new(RwLock::new(HashMap::new())));
+    }
 }

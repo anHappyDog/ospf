@@ -1,11 +1,13 @@
 use core::net;
-mod neighbor;
+mod cli;
 mod interface;
 mod lsa;
+mod neighbor;
 mod packet;
+mod util;
 
 lazy_static::lazy_static! {
-    pub static ref ROUTER_ID : net::Ipv4Addr = net::Ipv4Addr::new(1, 1, 1, 1);
+    pub static ref ROUTER_ID : net::Ipv4Addr = util::input_router_id();
 }
 
 pub const ALL_SPF_ROUTERS: net::Ipv4Addr = net::Ipv4Addr::new(224, 0, 0, 5);
@@ -16,10 +18,7 @@ pub const OSPF_VERSION: u8 = 2;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    interface::init().await?;
+    cli::cli().await?;
     Ok(())
 }
-
-
-
-
-

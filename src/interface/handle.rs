@@ -73,8 +73,6 @@ pub async fn send_udp(
     }
 }
 
-
-
 /// # recv_udp
 /// the function is used to create the future handle for recv udp ipv4 packet
 /// - udp_rx : the receiver for the udp handler
@@ -96,7 +94,6 @@ pub async fn recv_udp(
     }
 }
 
-
 /// # recv_tcp
 /// the function is used to create the future handle for recv tcp ipv4 packet
 /// - tcp_rx : the receiver for the tcp handler
@@ -117,3 +114,20 @@ pub async fn recv_tcp(mut tcp_rx: transport::TransportReceiver) {
 pub async fn wait_timer() {}
 
 pub async fn hello_timer() {}
+
+pub async fn init_handlers(ipv4_addrs: Vec<net::Ipv4Addr>) {
+    let mut handlers = HANDLERS.write().await;
+    ipv4_addrs.iter().for_each(|ipv4_addr| {
+        handlers.insert(
+            ipv4_addr.clone(),
+            Arc::new(RwLock::new(Handler {
+                send_tcp: None,
+                send_udp: None,
+                recv_tcp: None,
+                recv_udp: None,
+                wait_timer: None,
+                hello_timer: None,
+            })),
+        );
+    })
+}
