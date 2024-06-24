@@ -1,4 +1,5 @@
 use std::fmt::Debug;
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub enum Event {
     InterfaceUp,
     WaitTimer,
@@ -8,6 +9,8 @@ pub enum Event {
     UnloopInd,
     InterfaceDown,
 }
+
+unsafe impl Send for Event {}
 
 impl Debug for Event {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

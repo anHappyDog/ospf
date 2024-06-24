@@ -5,6 +5,7 @@ mod lsa;
 mod neighbor;
 mod packet;
 mod util;
+mod err;
 
 lazy_static::lazy_static! {
     pub static ref ROUTER_ID : net::Ipv4Addr = util::input_router_id();
@@ -17,7 +18,7 @@ pub const OSPF_IP_PROTOCOL: u8 = 89;
 pub const OSPF_VERSION: u8 = 2;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     interface::init().await?;
     cli::cli().await?;
     Ok(())

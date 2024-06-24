@@ -31,6 +31,8 @@ pub enum NetworkType {
     VirtualLink,
 }
 
+unsafe impl Send for NetworkType {}
+
 impl Debug for NetworkType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -56,7 +58,10 @@ pub struct Interface {
     pub network_type: NetworkType,
     pub auth_type: u8,
     pub auth_key: u64,
+    pub options : u8,
     pub router_priority: u8,
+    pub designated_router: net::Ipv4Addr,
+    pub backup_designated_router: net::Ipv4Addr,
 }
 
 impl Interface {}
@@ -130,8 +135,7 @@ async fn init_interfaces(interfaces: Vec<datalink::NetworkInterface>) {
                     "PointToMultipoint" => break NetworkType::PointToMultipoint,
                     "VirtualLink" => break NetworkType::VirtualLink,
                     _ => {
-                        println!("Invalid network type, please enter again");
-                        continue;
+                        break NetworkType::Broadcast
                     }
                 };
             };
@@ -167,6 +171,9 @@ async fn init_interfaces(interfaces: Vec<datalink::NetworkInterface>) {
                 auth_key,
                 router_priority,
                 status: status::Status::Down,
+                designated_router: net::Ipv4Addr::new(0, 0, 0, 0),
+                backup_designated_router: net::Ipv4Addr::new(0, 0, 0, 0),
+                options : 0,
             }));
             interfaces_name_map.insert(int.name.clone(), wrapped_interface.clone());
             interfaces_map.insert(ip, wrapped_interface.clone());
@@ -176,7 +183,7 @@ async fn init_interfaces(interfaces: Vec<datalink::NetworkInterface>) {
 
 /// this function will init all the global data about interface
 /// like the interfaces, neighbors, handlers
-pub async fn init() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn init() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     util::debug(&format!("Router id is set to: {}", ROUTER_ID.clone()));
     let interfaces = pnet::datalink::interfaces();
     let ipv4_addrs: Vec<net::Ipv4Addr> = interfaces
@@ -202,78 +209,7 @@ pub async fn init() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// the status machine for the interface
-pub async fn status_changed(interface_name: String, event: event::Event) {
-    match event {
-        event::Event::InterfaceUp => {
-            let interface_name_map = INTERFACES_BY_NAME.read().await;
-            if let Some(interface) = interface_name_map.get(&interface_name) {
-                let mut interface = interface.write().await;
-                if let status::Status::Down = interface.status {
-                    tokio::spawn(handle::init_when_interface_up(
-                        interface.ip,
-                        interface_name.clone(),
-                        interface.network_type,
-                        interface.router_priority,
-                    ));
-                    match interface.network_type {
-                        NetworkType::Broadcast | NetworkType::NBMA => {
-                            if interface.router_priority == 0 {
-                                interface.status = status::Status::DRother;
-                            } else {
-                                interface.status = status::Status::Waiting;
-                            }
-                        }
-                        NetworkType::PointToMultipoint
-                        | NetworkType::PointToPoint
-                        | NetworkType::VirtualLink => {
-                            interface.status = status::Status::PointToPoint;
-                        }
-                    }
-                    util::debug(&format!(
-                        "Interface {} status turned {:#?}",
-                        interface_name, interface.status
-                    ));
-                } else {
-                    util::error(&format!(
-                        "Interface {}'status is not down ,can not turn up.",
-                        interface_name
-                    ));
-                }
-            } else {
-                util::error(&format!("Interface {} not found", interface_name));
-            }
-        }
-        event::Event::InterfaceDown => {}
-        event::Event::LoopInd => {}
-        event::Event::UnloopInd => {
-            let interface_name_map = INTERFACES_BY_NAME.read().await;
-            if let Some(interface) = interface_name_map.get(&interface_name) {
-                let mut interface = interface.write().await;
-                if let status::Status::Loopback = interface.status {
-                    interface.status = status::Status::Down;
-                    util::debug(&format!(
-                        "Interface {} status turned {:#?}",
-                        interface_name, interface.status
-                    ));
-                } else {
-                    util::error(&format!(
-                        "Interface {}'status is not loopback ,can not turn unloop.",
-                        interface_name
-                    ));
-                }
-            } else {
-                util::error(&format!("Interface {} not found", interface_name));
-            }
-        }
-        event::Event::WaitTimer => {}
-        event::Event::NeighborChange => {}
-        event::Event::BackupSeen => {}
-        _ => {
-            util::error("Invalid event type,ignored.");
-        }
-    }
-}
+
 
 impl std::fmt::Display for Interface {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

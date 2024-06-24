@@ -30,7 +30,7 @@ pub struct Neighbor {
 lazy_static::lazy_static! {
     /// NEIGHBORS is a data structure used to store the neighbors for the interface
     /// it uses the interface's ipv4_addr to index its neighbors.
-    pub static ref NEIGHBORS : Arc<RwLock<HashMap<net::Ipv4Addr, Arc<RwLock<HashMap<net::Ipv4Addr,Neighbor>>>>>> = Arc::new(RwLock::new(HashMap::new()));
+    pub static ref NEIGHBORS : Arc<RwLock<HashMap<net::Ipv4Addr, Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<Neighbor>>>>>>>> = Arc::new(RwLock::new(HashMap::new()));
 }
 
 pub async fn init_neighbors(ipv4_addrs: Vec<net::Ipv4Addr>) {
@@ -42,6 +42,10 @@ pub async fn init_neighbors(ipv4_addrs: Vec<net::Ipv4Addr>) {
     }
 }
 
-pub async fn status_changed(ipv4_addr: net::Ipv4Addr, event: event::Event) {
-    
+pub async fn status_changed(
+    int_addr: net::Ipv4Addr,
+    ipv4_addr: net::Ipv4Addr,
+    event: event::Event,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    Ok(())
 }

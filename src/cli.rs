@@ -65,13 +65,13 @@ async fn match_ospf_command(line: &str) {
 async fn match_interface_subcommand(args_match: &ArgMatches) {
     if let Some(sub_command_matches) = args_match.subcommand_matches("up") {
         let interface_name = sub_command_matches.get_one::<String>("interface").unwrap();
-        tokio::spawn(interface::status_changed(
+        tokio::spawn(interface::status::status_changed(
             interface_name.clone(),
             interface::event::Event::InterfaceUp,
         ));
     } else if let Some(sub_command_matches) = args_match.subcommand_matches("down") {
         let interface_name = sub_command_matches.get_one::<String>("interface").unwrap();
-        tokio::spawn(interface::status_changed(
+        tokio::spawn(interface::status::status_changed(
             interface_name.clone(),
             interface::event::Event::InterfaceDown,
         ));
@@ -88,7 +88,7 @@ async fn match_interface_subcommand(args_match: &ArgMatches) {
     }
 }
 
-pub async fn cli() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn cli() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let cmdline_config = Config::builder()
         .history_ignore_space(true)
         .completion_type(CompletionType::List)
