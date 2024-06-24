@@ -132,3 +132,9 @@ impl Hello {
         packet.consume_to_immutable()
     }
 }
+
+
+pub async fn when_received(hello_packet : Hello,interface_name : String) {
+    
+}
+

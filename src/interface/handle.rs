@@ -39,7 +39,7 @@ pub struct Handler {
 
 pub async fn init_when_interface_up(
     ipv4_addr: net::Ipv4Addr,
-    interface_name : String,
+    interface_name: String,
     network_type: NetworkType,
     router_priority: u8,
 ) {
@@ -74,7 +74,11 @@ pub async fn init_when_interface_up(
     handler.send_tcp = Some(tokio::spawn(send_tcp(tcp_tx, tcp_inner_rx)));
     handler.send_udp = Some(tokio::spawn(send_udp(udp_tx, udp_inner_rx)));
     handler.recv_tcp = Some(tokio::spawn(recv_tcp(tcp_rx)));
-    handler.recv_udp = Some(tokio::spawn(recv_udp(udp_rx, udp_inner_tx,interface_name.clone())));
+    handler.recv_udp = Some(tokio::spawn(recv_udp(
+        udp_rx,
+        udp_inner_tx,
+        interface_name.clone(),
+    )));
     handler.hello_timer = Some(tokio::spawn(hello_timer()));
     match network_type {
         NetworkType::Broadcast | NetworkType::NBMA => {
@@ -222,20 +226,41 @@ pub fn try_get_ospf_packet(
 /// the function will loop until the ipv4 packet is received
 pub async fn recv_udp(
     mut udp_rx: transport::TransportReceiver,
-    mut udp_inner_tx: broadcast::Sender<bytes::Bytes>,
     interface_name: String,
 ) {
     let mut ipv4_packet_iter = transport::ipv4_packet_iter(&mut udp_rx);
     loop {
         match ipv4_packet_iter.next() {
-            Ok((ipv4_packet, ip)) => {
+            Ok((ipv4_packet, _)) => {
                 if !is_ipv4_packet_valid(&ipv4_packet) {
                     util::error("invalid ipv4 packet.");
                     continue;
                 }
                 match try_get_ospf_packet(&ipv4_packet, interface_name.clone()) {
-                    Ok(ospf_packet) => {}
-                    Err(_) => {
+                    Ok(ospf_packet) => match ospf_packet {
+                        OspfPacket::Hello(hello_packet) => {
+                            util::debug("ospf hello packet received.");
+                            tokio::spawn(packet::hello::when_received(hello_packet,interface_name.clone()));
+                        }
+                        OspfPacket::DD(dd_packet) => {
+                            util::debug("ospf dd packet received.");
+                            tokio::spawn(packet::dd::when_received(dd_packet));
+                        }
+                        OspfPacket::LSR(lsr_packet) => {
+                            util::debug("ospf lsr packet received.");
+                            tokio::spawn(packet::lsr::when_received(lsr_packet));
+                        }
+                        OspfPacket::LSU(lsu_packet) => {
+                            util::debug("ospf lsu packet received.");
+                            tokio::spawn(packet::lsu::when_received(lsu_packet));
+                        }
+                        OspfPacket::LSACK(lsack_packet) => {
+                            util::debug("ospf lsack packet received.");
+                            tokio::spawn(packet::lsack::when_received(lsack_packet));
+                        }
+                    },
+                    Err(e) => {
+                        util::error(e);
                         continue;
                     }
                 }

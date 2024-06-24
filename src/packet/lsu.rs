@@ -9,3 +9,8 @@ impl Lsu {
         unimplemented!()
     }
 }
+
+
+pub async fn when_received(lsu_packet : Lsu) {
+    unimplemented!()
+}

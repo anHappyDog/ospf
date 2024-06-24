@@ -14,3 +14,7 @@ impl DD {
         unimplemented!()
     }
 }
+
+pub async fn when_received(dd_packet : DD) {
+    unimplemented!()   
+}

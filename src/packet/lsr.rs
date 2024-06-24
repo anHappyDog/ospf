@@ -9,3 +9,7 @@ impl Lsr {
         unimplemented!()
     }
 }
+
+pub async fn when_received(lsr_packet : Lsr) {
+    
+}
