@@ -1,4 +1,4 @@
-use core::net;
+use std::net;
 use std::fmt::Debug;
 
 use pnet::packet::ipv4::Ipv4Packet;

@@ -302,7 +302,7 @@ pub async fn recv_udp(
                                 ipv4_addr,
                             ) {
                                 crate::util::error("Invalid packet for ospf received.");
-                                return Ok(());
+                                continue;
                             }
                             let source_addr = ipv4_packet.get_source();
                             tokio::spawn(crate::packet::hello::when_received(
@@ -372,7 +372,6 @@ pub async fn recv_tcp(
             }
         }
     }
-    Ok(())
 }
 
 pub async fn wait_timer() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {

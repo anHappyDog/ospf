@@ -1,4 +1,4 @@
-use core::net;
+use std::net;
 mod cli;
 mod interface;
 mod lsa;

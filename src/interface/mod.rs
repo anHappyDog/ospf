@@ -2,7 +2,7 @@ pub mod event;
 pub mod handle;
 pub mod status;
 pub mod trans;
-use core::net;
+use std::net;
 use pnet::datalink;
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
 use tokio::{

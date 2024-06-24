@@ -1,6 +1,5 @@
-use std::{fmt::Debug, future::Future};
+use std::fmt::Debug;
 
-use crate::lsa::router;
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub enum Status {
@@ -37,7 +36,7 @@ pub async fn status_changed(
     match event {
         super::event::Event::InterfaceUp => {
             let interface_name_map = super::INTERFACES_BY_NAME.read().await;
-            if let Some(interface) = interface_name_map.get(&interface_name.clone()).cloned() {
+            if let Some(interface) = interface_name_map.get(&interface_name.clone()) {
                 let mut interface = interface.write().await;
                 let network_type = interface.network_type;
                 let router_priority = interface.router_priority;
