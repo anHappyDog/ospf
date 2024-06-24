@@ -22,6 +22,7 @@ pub const DEFAULT_AUTH_TYPE: u8 = 0;
 pub const DEFAULT_AUTH_KEY: u64 = 0;
 pub const DEFAULT_AREA_ID: u32 = 0;
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum NetworkType {
     Broadcast,
     PointToPoint,
@@ -43,6 +44,7 @@ impl Debug for NetworkType {
 }
 
 pub struct Interface {
+    pub status: status::Status,
     pub ip: net::Ipv4Addr,
     pub mask: net::Ipv4Addr,
     pub area_id: u32,
@@ -53,7 +55,8 @@ pub struct Interface {
     pub router_dead_interval: u32,
     pub network_type: NetworkType,
     pub auth_type: u8,
-    pub autn_key: u64,
+    pub auth_key: u64,
+    pub router_priority: u8,
 }
 
 impl Interface {}
@@ -63,6 +66,8 @@ lazy_static::lazy_static! {
     pub static ref INTERFACES_BY_NAME : Arc<RwLock<HashMap<String,Arc<RwLock<Interface>>>>> = Arc::new(RwLock::new(HashMap::new()));
 }
 
+/// the function called by the public init function
+/// it will init the interfaces and store them in the global data
 async fn init_interfaces(interfaces: Vec<datalink::NetworkInterface>) {
     let mut interfaces_map = INTERFACES.write().await;
     let mut interfaces_name_map = INTERFACES_BY_NAME.write().await;
@@ -142,6 +147,12 @@ async fn init_interfaces(interfaces: Vec<datalink::NetworkInterface>) {
             ))
             .parse::<u64>()
             .unwrap_or(DEFAULT_AUTH_KEY);
+            let router_priority = util::prompt_and_read(&format!(
+                "Enter the router priority for interface {} (default is {}):",
+                ip, DEFAULT_ROUTER_PRIORITY
+            ))
+            .parse()
+            .unwrap_or(DEFAULT_ROUTER_PRIORITY);
             let wrapped_interface = Arc::new(RwLock::new(Interface {
                 ip,
                 mask,
@@ -153,7 +164,9 @@ async fn init_interfaces(interfaces: Vec<datalink::NetworkInterface>) {
                 router_dead_interval,
                 network_type,
                 auth_type,
-                autn_key: auth_key,
+                auth_key,
+                router_priority,
+                status: status::Status::Down,
             }));
             interfaces_name_map.insert(int.name.clone(), wrapped_interface.clone());
             interfaces_map.insert(ip, wrapped_interface.clone());
@@ -189,12 +202,70 @@ pub async fn init() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// the status machine for the interface
 pub async fn status_changed(interface_name: String, event: event::Event) {
     match event {
-        event::Event::InterfaceUp => {}
+        event::Event::InterfaceUp => {
+            let interface_name_map = INTERFACES_BY_NAME.read().await;
+            if let Some(interface) = interface_name_map.get(&interface_name) {
+                let mut interface = interface.write().await;
+                if let status::Status::Down = interface.status {
+                    tokio::spawn(handle::init_when_interface_up(
+                        interface.ip,
+                        interface_name.clone(),
+                        interface.network_type,
+                        interface.router_priority,
+                    ));
+                    match interface.network_type {
+                        NetworkType::Broadcast | NetworkType::NBMA => {
+                            if interface.router_priority == 0 {
+                                interface.status = status::Status::DRother;
+                            } else {
+                                interface.status = status::Status::Waiting;
+                            }
+                        }
+                        NetworkType::PointToMultipoint
+                        | NetworkType::PointToPoint
+                        | NetworkType::VirtualLink => {
+                            interface.status = status::Status::PointToPoint;
+                        }
+                    }
+                    util::debug(&format!(
+                        "Interface {} status turned {:#?}",
+                        interface_name, interface.status
+                    ));
+                } else {
+                    util::error(&format!(
+                        "Interface {}'status is not down ,can not turn up.",
+                        interface_name
+                    ));
+                }
+            } else {
+                util::error(&format!("Interface {} not found", interface_name));
+            }
+        }
         event::Event::InterfaceDown => {}
         event::Event::LoopInd => {}
-        event::Event::UnloopInd => {}
+        event::Event::UnloopInd => {
+            let interface_name_map = INTERFACES_BY_NAME.read().await;
+            if let Some(interface) = interface_name_map.get(&interface_name) {
+                let mut interface = interface.write().await;
+                if let status::Status::Loopback = interface.status {
+                    interface.status = status::Status::Down;
+                    util::debug(&format!(
+                        "Interface {} status turned {:#?}",
+                        interface_name, interface.status
+                    ));
+                } else {
+                    util::error(&format!(
+                        "Interface {}'status is not loopback ,can not turn unloop.",
+                        interface_name
+                    ));
+                }
+            } else {
+                util::error(&format!("Interface {} not found", interface_name));
+            }
+        }
         event::Event::WaitTimer => {}
         event::Event::NeighborChange => {}
         event::Event::BackupSeen => {}
@@ -208,14 +279,14 @@ impl std::fmt::Display for Interface {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Interface: {}\nMask: {}\nArea id: {}\nOutput cost: {}\nRxmt interval: {}\ninf_trans_delay:{}\nhello_interval:{}\nrouter_dead_interval:{}\nNetwork type: {:?}\nAuth type: {}\nAuth key: {}",
+            "Interface: {}\nMask: {}\nArea id: {}\nOutput cost: {}\nRxmt interval: {}\ninf_trans_delay:{}\nhello_interval:{}\nrouter_dead_interval:{}\nNetwork type: {:?}\nAuth type: {}\nAuth key: {}\nstatus: {:#?}\npriority: {}\n",
             self.ip, self.mask, self.area_id, self.output_cost, self.rxmt_interval
-            ,self.inf_trans_delay,self.hello_interval,self.router_dead_interval,self.network_type,self.auth_type,self.autn_key
+            ,self.inf_trans_delay,self.hello_interval,self.router_dead_interval,self.network_type,self.auth_type,self.auth_key,self.status,self.router_priority
         )
     }
 }
 
-pub async fn interface_display(interface_name: String) {
+pub async fn display(interface_name: String) {
     let interface_name_map = INTERFACES_BY_NAME.read().await;
     if let Some(interface) = interface_name_map.get(&interface_name) {
         let interface = interface.read().await;
@@ -227,7 +298,7 @@ pub async fn interface_display(interface_name: String) {
     }
 }
 
-pub async fn interface_list() {
+pub async fn list() {
     let interface_name_map = INTERFACES_BY_NAME.read().await;
 
     for (name, interface) in interface_name_map.iter() {

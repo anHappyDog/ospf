@@ -76,10 +76,10 @@ async fn match_interface_subcommand(args_match: &ArgMatches) {
             interface::event::Event::InterfaceDown,
         ));
     } else if let Some(_) = args_match.subcommand_matches("list") {
-        interface::interface_list().await;
+        interface::list().await;
     } else if let Some(sub_command_matches) = args_match.subcommand_matches("display") {
         let interface_name = sub_command_matches.get_one::<String>("interface").unwrap();
-        interface::interface_display(interface_name.clone()).await;
+        interface::display(interface_name.clone()).await;
     } else {
         INTERFACE_COMMAND
             .clone()

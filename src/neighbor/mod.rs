@@ -3,6 +3,7 @@ use std::{collections::HashMap, net, sync::Arc};
 use tokio::{sync::RwLock, task::JoinHandle};
 
 pub mod event;
+pub mod handle;
 pub mod status;
 
 /// # Neighbor
@@ -39,4 +40,8 @@ pub async fn init_neighbors(ipv4_addrs: Vec<net::Ipv4Addr>) {
             .await
             .insert(ipv4_addr, Arc::new(RwLock::new(HashMap::new())));
     }
+}
+
+pub async fn status_changed(ipv4_addr: net::Ipv4Addr, event: event::Event) {
+    
 }

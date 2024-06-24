@@ -1,9 +1,11 @@
 use core::net;
-use std::sync::Arc;
 use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::{ip::IpNextHeaderProtocol, ipv4::MutableIpv4Packet};
+use std::sync::Arc;
 
 use crate::{interface, OSPF_IP_PROTOCOL};
+
+pub const HELLO_TYPE: u8 = 1;
 
 #[derive(Clone)]
 pub struct Hello {
@@ -22,6 +24,48 @@ impl Hello {
     pub fn checksum(&self) -> usize {
         0
     }
+    pub fn try_from_be_bytes(payload: &[u8]) -> Option<Self> {
+        let ospf_header = match super::OspfHeader::try_from_be_bytes(payload) {
+            Some(ospf_header) => ospf_header,
+            None => return None,
+        };
+        let mut neighbors = Vec::new();
+        for i in 40..payload.len() {
+            neighbors.push(u32::from_be_bytes([
+                payload[i],
+                payload[i + 1],
+                payload[i + 2],
+                payload[i + 3],
+            ]));
+        }
+        Some(Self {
+            header: ospf_header,
+            network_mask: u32::from_be_bytes([payload[24], payload[25], payload[26], payload[27]]),
+            hello_interval: u16::from_be_bytes([payload[28], payload[29]]),
+            options: payload[30],
+            router_priority: payload[31],
+            router_dead_interval: u32::from_be_bytes([
+                payload[32],
+                payload[33],
+                payload[34],
+                payload[35],
+            ]),
+            designated_router: u32::from_be_bytes([
+                payload[36],
+                payload[37],
+                payload[38],
+                payload[39],
+            ]),
+            backup_designated_router: u32::from_be_bytes([
+                payload[40],
+                payload[41],
+                payload[42],
+                payload[43],
+            ]),
+            neighbors,
+        })
+    }
+
     pub fn empty() -> Hello {
         Hello {
             header: super::OspfHeader::empty(),

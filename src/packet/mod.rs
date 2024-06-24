@@ -16,6 +16,18 @@ pub struct OspfHeader {
     pub authentication: [u8; 8],
 }
 
+pub enum OspfPacket {
+    Hello(hello::Hello),
+    DD(dd::DD),
+    LSU(lsu::Lsu),
+    LSR(lsr::Lsr),
+    LSACK(lsack::Lsack),
+}
+
+impl OspfPacket {
+    
+}
+
 impl OspfHeader {
     pub fn empty() -> OspfHeader {
         OspfHeader {
@@ -28,6 +40,30 @@ impl OspfHeader {
             auth_type: 0,
             authentication: [0; 8],
         }
+    }
+    pub fn try_from_be_bytes(payload: &[u8]) -> Option<Self> {
+        if payload.len() < Self::length() {
+            return None;
+        }
+        Some(Self {
+            version: payload[0],
+            packet_type: payload[1],
+            packet_length: u16::from_be_bytes([payload[2], payload[3]]),
+            router_id: u32::from_be_bytes([payload[4], payload[5], payload[6], payload[7]]),
+            area_id: u32::from_be_bytes([payload[8], payload[9], payload[10], payload[11]]),
+            checksum: u16::from_be_bytes([payload[12], payload[13]]),
+            auth_type: payload[14],
+            authentication: [
+                payload[15],
+                payload[16],
+                payload[17],
+                payload[18],
+                payload[19],
+                payload[20],
+                payload[21],
+                payload[22],
+            ],
+        })
     }
     pub fn to_be_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
