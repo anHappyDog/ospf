@@ -6,6 +6,9 @@ pub struct SummaryLSA {
     pub tos: Vec<u32>,
 }
 
+pub const SUMMARY_LSA_TYPE_3: u8 = 3;
+pub const SUMMARY_LSA_TYPE_4: u8 = 4;
+
 impl SummaryLSA {
     pub fn tos_type(tos: u32) -> u8 {
         (tos >> 24) as u8
@@ -26,4 +29,31 @@ impl SummaryLSA {
         }
         bytes
     }
+    pub fn try_from_be_bytes(payload: &[u8]) -> Option<Self> {
+        if payload.len() < super::Header::length() + 4 {
+            return None;
+        }
+        let header = super::Header::try_from_be_bytes(&payload[..super::Header::length()])?;
+        let zero_padding = payload[super::Header::length()];
+        let metric = [payload[super::Header::length() + 1], payload[super::Header::length() + 2], payload[super::Header::length() + 3]];
+        let mut tos = Vec::new();
+        let mut offset = super::Header::length() + 4;
+        while offset + 4 <= payload.len() {
+            let tos_value = u32::from_be_bytes([
+                payload[offset],
+                payload[offset + 1],
+                payload[offset + 2],
+                payload[offset + 3],
+            ]);
+            tos.push(tos_value);
+            offset += 4;
+        }
+        Some(Self {
+            header,
+            zero_padding,
+            metric,
+            tos,
+        })
+    }
+
 }

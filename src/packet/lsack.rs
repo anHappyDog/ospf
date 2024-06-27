@@ -5,7 +5,7 @@ use pnet::packet::{
     ipv4::{Ipv4Packet, MutableIpv4Packet},
 };
 
-use crate::{interface, OSPF_IP_PROTOCOL};
+use crate::{interface::{self, NetworkType}, OSPF_IP_PROTOCOL};
 
 pub const LSACK_TYPE: u8 = 5;
 
@@ -32,7 +32,20 @@ impl Lsack {
             lsa_headers: Vec::new(),
         }
     }
-
+    pub fn get_neighbor_addr(&self, network_type: NetworkType, paddr: net::Ipv4Addr) -> net::Ipv4Addr {
+        match network_type {
+            NetworkType::Broadcast | NetworkType::NBMA | NetworkType::PointToMultipoint => paddr,
+            _ => self.header.router_id,
+        }
+    }
+    pub fn get_neighbor_id(&self, network_type: NetworkType, paddr: net::Ipv4Addr) -> net::Ipv4Addr {
+        match network_type {
+            NetworkType::Broadcast | NetworkType::NBMA | NetworkType::PointToMultipoint => {
+                self.header.router_id
+            }
+            _ => paddr,
+        }
+    }
     pub fn try_from_be_bytes(payload: &[u8]) -> Option<Self> {
         if payload.len() % crate::lsa::Header::length() != 0 {
             return None;

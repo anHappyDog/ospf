@@ -1,7 +1,11 @@
 use core::net;
 use std::{collections::HashMap, sync::Arc};
 
+use as_external::AS_EXTERNAL_LSA_TYPE;
+use network::NETWORK_LSA_TYPE;
 use pnet::util::Octets;
+use router::ROUTER_LSA_TYPE;
+use summary::{SUMMARY_LSA_TYPE_3, SUMMARY_LSA_TYPE_4};
 use tokio::sync::RwLock;
 
 pub mod as_external;
@@ -129,6 +133,22 @@ pub enum Lsa {
 }
 
 impl Lsa {
+    pub fn try_from_be_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() < Header::length() {
+            return None;
+        }
+        let header = Header::try_from_be_bytes(&bytes[..Header::length()])?;
+        match header.lsa_type {
+            ROUTER_LSA_TYPE => router::RouterLSA::try_from_be_bytes(bytes).map(Lsa::Router),
+            NETWORK_LSA_TYPE => network::NetworkLSA::try_from_be_bytes(bytes).map(Lsa::Network),
+            SUMMARY_LSA_TYPE_3 => summary::SummaryLSA::try_from_be_bytes(bytes).map(Lsa::Summary),
+            SUMMARY_LSA_TYPE_4 => summary::SummaryLSA::try_from_be_bytes(bytes).map(Lsa::Summary),
+            AS_EXTERNAL_LSA_TYPE => {
+                as_external::ASExternalLSA::try_from_be_bytes(bytes).map(Lsa::ASExternal)
+            }
+            _ => None,
+        }
+    }
     pub fn to_be_bytes(&self) -> Vec<u8> {
         match self {
             Lsa::Router(lsa) => lsa.to_be_bytes(),

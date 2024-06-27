@@ -1,4 +1,7 @@
-use std::{net, sync::Arc};
+use std::{
+    net::{self, Ipv4Addr},
+    sync::Arc,
+};
 
 use pnet::packet::{
     ip::IpNextHeaderProtocol,
@@ -30,6 +33,15 @@ pub struct Hello {
 }
 
 impl Hello {
+    pub async fn add_neighbors(&mut self, iaddr: net::Ipv4Addr) {
+        let int_neighbors = neighbor::INT_NEIGHBORS_MAP.read().await;
+        let int_neighbors = int_neighbors.get(&iaddr).unwrap();
+        let int_neighbors = int_neighbors.read().await;
+        for (naddr, _) in int_neighbors.iter() {
+            self.neighbors.push(naddr.clone().into());
+        }
+    }
+
     /// create and fill a new hello packet.
     pub async fn new(iaddr: net::Ipv4Addr) -> Self {
         let mut packet = Self::empty();
@@ -37,11 +49,16 @@ impl Hello {
         let interface = interfaces_map.get(&iaddr).unwrap();
         packet.header.router_id = crate::ROUTER_ID.clone().into();
         packet.header.area_id = interface.area_id;
+        packet.header.version = OSPF_VERSION;
+        packet.header.auth_type = interface.auth_type;
+        packet.header.authentication = interface.auth_key;
+        packet.header.packet_type = HELLO_TYPE;
         packet.network_mask = interface.mask.into();
         packet.hello_interval = interface.hello_interval;
         packet.options = interface.options;
         packet.router_priority = interface.router_priority;
         packet.router_dead_interval = interface.router_dead_interval;
+
         packet.designated_router = {
             let area_drs = crate::area::DR_MAP.read().await;
             let dr = area_drs.get(&interface.area_id).unwrap().clone();
@@ -52,24 +69,102 @@ impl Hello {
             let bdr = area_bdrs.get(&interface.area_id).unwrap().clone();
             bdr.into()
         };
-        let int_neighbors = neighbor::INT_NEIGHBORS_MAP.read().await;
-        let int_neighbors = int_neighbors.get(&iaddr).unwrap();
-        let int_neighbors = int_neighbors.read().await;
-        int_neighbors.iter().for_each(|neighbor| {
-            packet.neighbors.push(*neighbor);
-        });
+        packet.add_neighbors(iaddr).await;
         packet.header.packet_length = packet.length() as u16;
         packet.header.checksum = ospf_packet_checksum(&packet.to_be_bytes());
         packet
     }
+    pub async fn checked(&self, iaddr: net::Ipv4Addr) -> bool {
+        let interfaces_map = interface::INTERFACE_MAP.read().await;
+        let interface = interfaces_map.get(&iaddr).unwrap();
+        if self.header.version != OSPF_VERSION {
+            util::error("Hello: invalid version");
+            return false;
+        }
+        if self.header.area_id != interface.area_id {
+            util::error("Hello: invalid area_id");
+            return false;
+        }
+        if self.header.auth_type != interface.auth_type {
+            util::error("Hello: invalid auth_type");
+            return false;
+        }
+        if self.header.authentication != interface.auth_key {
+            util::error("Hello: invalid auth_key");
+            return false;
+        }
+        if self.network_mask != interface.mask.into() {
+            util::error("Hello: invalid network_mask");
+            return false;
+        }
+        if self.hello_interval != interface.hello_interval {
+            util::error("Hello: invalid hello_interval");
+            return false;
+        }
+        if self.router_dead_interval != interface.router_dead_interval {
+            util::error("Hello: invalid router_dead_interval");
+            return false;
+        }
+        let g_area = area::AREA_MAP.read().await;
+        let area = g_area.get(&interface.area_id).unwrap();
+        let locked_area = area.read().await;
 
-    /// remember the process for the neighbors in the packet may be not processed properly.
-    pub async fn received(
-        hello_packet: Hello,
-        packet_source_addr: net::Ipv4Addr,
-        int_ipv4_addr: net::Ipv4Addr,
-    ) {
+        // also need to check the E bit whether is the stub area.
+        if self.options & crate::OPTION_E == crate::OPTION_E
+            && !locked_area.external_routing_capability
+            || self.options & crate::OPTION_E == 0 && locked_area.external_routing_capability
+        {
+            util::error("Hello: invalid options for external capability.");
+            return false;
+        }
+        true
+    }
 
+    pub fn get_neighbor_addr(&self, network_type: NetworkType, paddr: net::Ipv4Addr) -> Ipv4Addr {
+        match network_type {
+            NetworkType::Broadcast | NetworkType::NBMA | NetworkType::PointToMultipoint => paddr,
+            _ => self.header.router_id,
+        }
+    }
+    pub fn get_neighbor_id(&self, network_type: NetworkType, paddr: net::Ipv4Addr) -> Ipv4Addr {
+        match network_type {
+            NetworkType::Broadcast | NetworkType::NBMA | NetworkType::PointToMultipoint => {
+                self.header.router_id
+            }
+            _ => paddr,
+        }
+    }
+
+    // the packet shoudld be checked before calling this function
+    pub async fn received(packet: Hello, packet_source_addr: net::Ipv4Addr, iaddr: net::Ipv4Addr) {
+        // check the packet is valid
+        if !packet.checked(iaddr).await {
+            return;
+        }
+        let network_type = {
+            let interfaces_map = interface::INTERFACE_MAP.read().await;
+            let interface = interfaces_map.get(&iaddr).unwrap();
+            interface.network_type
+        };
+        let naddr = packet.get_neighbor_addr(network_type, packet_source_addr);
+        let neighbor_id = packet.get_neighbor_id(network_type, packet_source_addr);
+        if !neighbor::contains_neighbor(iaddr, naddr).await {
+            neighbor::add(
+                iaddr,
+                naddr,
+                neighbor::Neighbor::from_hello_packet(&packet, naddr, neighbor_id),
+            )
+            .await;
+        }
+        if packet.neighbors.contains(&u32::from(iaddr.clone())) {
+            neighbor::event::Event::two_way_received(naddr, iaddr).await;
+            neighbor::update_neighbor(iaddr, naddr, &packet).await;
+        } else {
+            // SHOULD EXECUTE THIS IMMEDIATELY
+            //   neighbor::event::send(iaddr, naddr, neighbor::event::Event::OneWayReceived).await;
+            neighbor::event::Event::one_way_received(naddr, iaddr).await;
+        }
+        // currently not handling the NBMA's hello packet receiving.
     }
     pub fn try_from_be_bytes(payload: &[u8]) -> Option<Self> {
         let ospf_header = match super::OspfHeader::try_from_be_bytes(payload) {

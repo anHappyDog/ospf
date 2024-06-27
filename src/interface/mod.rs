@@ -9,7 +9,7 @@ use std::{collections::HashMap, net::Ipv4Addr, sync::Arc};
 use pnet::{datalink, packet::ip};
 use tokio::sync::RwLock;
 
-use crate::{neighbor, ROUTER_ID};
+use crate::{area, neighbor, ROUTER_ID};
 
 lazy_static::lazy_static! {
     pub static ref INTERFACE_STATUS_MAP: Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<status::Status>>>>> = Arc::new(RwLock::new(HashMap::new()));
@@ -70,11 +70,15 @@ pub struct Interface {
 fn try_get_ip_mask(
     interface: &datalink::NetworkInterface,
 ) -> Option<(net::Ipv4Addr, net::Ipv4Addr)> {
-    interface.ips.iter().find(|ip| ip.is_ipv4() && !interface.is_loopback() ).map(|ip| {
-        let iaddr: Ipv4Addr = ip.ip().to_string().parse::<net::Ipv4Addr>().unwrap();
-        let mask = ip.mask().to_string().parse::<net::Ipv4Addr>().unwrap();
-        (iaddr, mask)
-    })
+    interface
+        .ips
+        .iter()
+        .find(|ip| ip.is_ipv4() && !interface.is_loopback())
+        .map(|ip| {
+            let iaddr: Ipv4Addr = ip.ip().to_string().parse::<net::Ipv4Addr>().unwrap();
+            let mask = ip.mask().to_string().parse::<net::Ipv4Addr>().unwrap();
+            (iaddr, mask)
+        })
 }
 
 pub async fn add(interface: &datalink::NetworkInterface) {
@@ -156,6 +160,11 @@ pub async fn add(interface: &datalink::NetworkInterface) {
     ))
     .parse()
     .unwrap_or(DEFAULT_ROUTER_PRIORITY);
+
+    if !area::exists(area_id.into()).await {
+        crate::util::log(&format!("Area {} does not exist,now created.", area_id));
+        area::add(area_id.into()).await;
+    }
     let options = DEFAULT_OPTIONS;
 
     let int = Interface {
@@ -199,28 +208,30 @@ async fn init_interfaces(interfaces: Vec<datalink::NetworkInterface>) {
 pub async fn init() -> Result<(), Box<dyn std::error::Error>> {
     crate::util::log(&format!("Router id is set to: {}", ROUTER_ID.clone()));
     let interfaces = pnet::datalink::interfaces();
-    let ipv4_addrs: Vec<net::Ipv4Addr> = interfaces
-        .iter()
-        .map(|interface| {
-            interface
-                .ips
-                .iter()
-                .find(|ip| ip.is_ipv4())
-                .unwrap()
-                .ip()
-                .to_string()
-                .parse()
-                .unwrap()
-        })
-        .collect();
+    let mut ipv4_addrs: Vec<net::Ipv4Addr> = Vec::new();
+    for interface in &interfaces {
+        let ip_mask = try_get_ip_mask(interface);
+        if let None = ip_mask {
+            continue;
+        }
+        let (ip, _) = ip_mask.unwrap();
+        ipv4_addrs.push(ip);
+    }
 
     tokio::try_join!(
         tokio::spawn(init_interfaces(interfaces.clone())),
         tokio::spawn(handle::init(ipv4_addrs.clone())),
-        tokio::spawn(trans::init(ipv4_addrs.clone()))
+        tokio::spawn(trans::init(ipv4_addrs.clone())),
+        tokio::spawn(neighbor::init(ipv4_addrs.clone())),
     )?;
 
     Ok(())
+}
+
+pub async fn get_area_id(iaddr: net::Ipv4Addr) -> net::Ipv4Addr {
+    let interface_map = INTERFACE_MAP.read().await;
+    let interface = interface_map.get(&iaddr).unwrap();
+    interface.area_id
 }
 
 pub async fn get_status(iaddr: net::Ipv4Addr) -> status::Status {
@@ -237,13 +248,12 @@ pub async fn set_status(iaddr: net::Ipv4Addr, status: status::Status) {
     *locked_status = status;
 }
 
-pub async fn send_neighbor_killnbr(ip: net::Ipv4Addr) {
-    let neighbor_map = neighbor::INT_NEIGHBORS_MAP.read().await;
-    let int_neighbor_map = neighbor_map.get(&ip).unwrap();
-    let locked_int_neighbor_map = int_neighbor_map.read().await;
-    for neighbor_ip in locked_int_neighbor_map.iter() {
-        let naddr: net::Ipv4Addr = net::Ipv4Addr::from(*neighbor_ip);
-        neighbor::event::send(naddr, neighbor::event::Event::KillNbr).await;
+pub async fn send_neighbor_killnbr(iaddr: net::Ipv4Addr) {
+    let neighbors_map = neighbor::INT_NEIGHBORS_MAP.read().await;
+    let neighbors = neighbors_map.get(&iaddr).unwrap();
+    let locked_neighbors = neighbors.read().await;
+    for (naddr, _) in locked_neighbors.iter() {
+        neighbor::event::send(iaddr, naddr.clone(), neighbor::event::Event::KillNbr).await;
     }
 }
 

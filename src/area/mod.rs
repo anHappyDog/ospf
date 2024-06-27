@@ -26,6 +26,23 @@ pub struct AddrRange {
     pub mask: net::Ipv4Addr,
 }
 
+
+pub async fn get_dr(area_id: net::Ipv4Addr) -> net::Ipv4Addr {
+    let dr_map = DR_MAP.read().await;
+    *dr_map.get(&area_id).unwrap()
+}
+
+pub async fn get_bdr(area_id: net::Ipv4Addr) -> net::Ipv4Addr {
+    let bdr_map = BDR_MAP.read().await;
+    *bdr_map.get(&area_id).unwrap()
+}
+
+pub async fn exists(area_id: net::Ipv4Addr) -> bool {
+    let area_map = AREA_MAP.read().await;
+    let result = area_map.get(&area_id);
+    result.is_some()
+}
+
 pub async fn add(area_id: net::Ipv4Addr) {
     let mut area_map = AREA_MAP.write().await;
     area_map.insert(

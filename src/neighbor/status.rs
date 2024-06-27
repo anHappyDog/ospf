@@ -1,6 +1,5 @@
 use std::net;
 
-use rustyline::Event;
 use tokio::sync::broadcast;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -17,16 +16,18 @@ pub enum Status {
 
 pub async fn changed(naddr: net::Ipv4Addr, iaddr: net::Ipv4Addr) {
     let event_senders = crate::neighbor::event::EVENT_SENDERS.read().await;
+    let int_event_senders = event_senders.get(&iaddr).unwrap();
+    let e_senders = int_event_senders.read().await;
     let mut event_rx: broadcast::Receiver<super::event::Event> =
-        event_senders.get(&naddr).unwrap().subscribe();
+        e_senders.get(&naddr).unwrap().subscribe();
+    drop(e_senders);
     drop(event_senders);
-
     loop {
         match event_rx.recv().await {
             Ok(event) => match event {
                 super::event::Event::HelloReceived => {
                     crate::util::debug(&format!("HelloReceived: {}", naddr));
-                    super::event::Event::hello_received(naddr).await;
+                    super::event::Event::hello_received(naddr, iaddr).await;
                 }
                 super::event::Event::Start => {
                     crate::util::debug(&format!("Start: {}", naddr));
@@ -50,7 +51,7 @@ pub async fn changed(naddr: net::Ipv4Addr, iaddr: net::Ipv4Addr) {
                 }
                 super::event::Event::LoadingDone => {
                     crate::util::debug(&format!("LoadingDone: {}", naddr));
-                    super::event::Event::loading_done(naddr).await;
+                    super::event::Event::loading_done(naddr, iaddr).await;
                 }
                 super::event::Event::AdjOk => {
                     crate::util::debug(&format!("AdjOk: {}", naddr));
@@ -62,19 +63,19 @@ pub async fn changed(naddr: net::Ipv4Addr, iaddr: net::Ipv4Addr) {
                 }
                 super::event::Event::OneWayReceived => {
                     crate::util::debug(&format!("OneWayReceived: {}", naddr));
-                    super::event::Event::one_way_received(naddr).await;
+                    super::event::Event::one_way_received(naddr, iaddr).await;
                 }
                 super::event::Event::InactivityTimer => {
                     crate::util::debug(&format!("InactivityTimer: {}", naddr));
-                    super::event::Event::inactivity_timer(naddr).await;
+                    super::event::Event::inactivity_timer(naddr, iaddr).await;
                 }
                 super::event::Event::KillNbr => {
                     crate::util::debug(&format!("KillNbr: {}", naddr));
-                    super::event::Event::kill_nbr(naddr).await;
+                    super::event::Event::kill_nbr(naddr, iaddr).await;
                 }
                 super::event::Event::LLDown => {
                     crate::util::debug(&format!("LLDown: {}", naddr));
-                    super::event::Event::ll_down(naddr).await;
+                    super::event::Event::ll_down(naddr, iaddr).await;
                 }
             },
             Err(e) => {

@@ -2,6 +2,7 @@ use std::{collections::HashMap, net, sync::Arc};
 
 use pnet::{
     packet::{
+        self,
         ip::{self, IpNextHeaderProtocols::Udp},
         ipv4, Packet,
     },
@@ -12,7 +13,11 @@ use tokio::{
     time,
 };
 
-use crate::{packet::hello::HELLO_TYPE, IPV4_PACKET_MTU, OSPF_IP_PROTOCOL};
+use crate::{
+    neighbor,
+    packet::{dd::DD, hello::HELLO_TYPE},
+    IPV4_PACKET_MTU, OSPF_IP_PROTOCOL,
+};
 
 // ONLY USE IN THE INNER INTERFACE
 // KEY IS THE INTERFACE 'S IPV4 ADDR
@@ -316,6 +321,7 @@ pub async fn hello_timer(
     udp_inner_tx: broadcast::Sender<bytes::Bytes>,
     hello_interval: u16,
 ) -> () {
+    crate::util::debug("hello timer started.");
     let mut buffer: Vec<u8> = vec![0; IPV4_PACKET_MTU];
     let interval = time::Duration::from_secs(hello_interval as u64);
     loop {
@@ -340,6 +346,54 @@ pub async fn hello_timer(
                 Err(e) => {
                     crate::util::error(&format!("send hello packet failed:{}", e));
                 }
+            }
+        }
+    }
+}
+
+pub async fn start_dd_negoation(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr) {
+    let handles = HANDLE_MAP.read().await;
+    let handle = handles.get(&iaddr).unwrap();
+    let mut int_handle = handle.write().await;
+    let g_trans = super::trans::TRANSMISSIONS.read().await;
+    let trans = g_trans.get(&iaddr).unwrap();
+    int_handle.dd_negoation = Some(tokio::spawn(dd_negoation(
+        trans.inner_udp_tx.clone(),
+        iaddr,
+        naddr,
+    )));
+}
+
+pub async fn dd_negoation(
+    udp_inner_tx: broadcast::Sender<bytes::Bytes>,
+    iaddr: net::Ipv4Addr,
+    naddr: net::Ipv4Addr,
+) {
+    let interface_map = super::INTERFACE_MAP.read().await;
+    let interface = interface_map.get(&iaddr).unwrap();
+    let rxmt_interval = interface.rxmt_interval;
+    let duration = time::Duration::from_secs(rxmt_interval as u64);
+    let dd_options = 0;
+    let dd_flags = 0;
+    let ddseq = neighbor::get_ddseqno(iaddr, naddr).await;
+
+    loop {
+        tokio::time::sleep(duration).await;
+        let dd_packet = DD::new(iaddr, naddr, dd_options, dd_flags, ddseq).await;
+        let mut buffer: Vec<u8> = vec![0; IPV4_PACKET_MTU];
+        let ip_packet = match dd_packet.build_ipv4_packet(&mut buffer, iaddr, naddr) {
+            Some(ip_packet) => ip_packet,
+            None => {
+                crate::util::error(&format!("build dd packet failed."));
+                continue;
+            }
+        };
+        match udp_inner_tx.send(bytes::Bytes::from(ip_packet.packet().to_vec())) {
+            Ok(_) => {
+                crate::util::debug("send dd packet success.");
+            }
+            Err(e) => {
+                crate::util::error(&format!("send dd packet failed:{}", e));
             }
         }
     }

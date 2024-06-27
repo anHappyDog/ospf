@@ -6,7 +6,7 @@ use pnet::{
 };
 use tokio::sync::broadcast;
 
-use crate::{neighbor, IPV4_PACKET_MTU};
+use crate::{area, neighbor, IPV4_PACKET_MTU};
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub enum Status {
@@ -35,38 +35,42 @@ impl Debug for Status {
     }
 }
 
-async fn select_dr_bdr(ipv4_addr: net::Ipv4Addr) -> Status {
-    unimplemented!()
-}
 
 /// the status machine of the passed param ipv4_addr 's interface
 pub async fn changed(iaddr: net::Ipv4Addr) -> () {
+    crate::util::debug("interface status machine started.");
     let mut event_rx = {
         let mut event_senders = super::event::EVENT_SENDERS.write().await;
-        let (event_tx, event_rx) = broadcast::channel(32);
-        event_senders.insert(iaddr, event_tx);
-        event_rx
+        let (event_tx, _) = broadcast::channel(32);
+        event_senders.insert(iaddr, event_tx.clone());
+        event_tx.subscribe()
     };
     loop {
         match event_rx.recv().await {
             Ok(event) => match event {
                 super::event::Event::InterfaceUp => {
-                    super::event::Event::interface_up(iaddr);
+                    crate::util::debug("interface up event received.");
+                    super::event::Event::interface_up(iaddr).await;
                 }
                 super::event::Event::WaitTimer | super::event::Event::BackupSeen => {
-                    super::event::Event::wait_timer(iaddr);
+                    crate::util::debug("wait timer event received.");
+                    super::event::Event::wait_timer(iaddr).await;
                 }
                 super::event::Event::InterfaceDown => {
-                    super::event::Event::interface_down(iaddr);
+                    crate::util::debug("interface down event received.");
+                    super::event::Event::interface_down(iaddr).await;
                 }
-                super::event::Event::LoopInd(interface_name) => {
-                    super::event::Event::loop_ind(iaddr);
+                super::event::Event::LoopInd(_interface_name) => {
+                    crate::util::debug("loop event received.");
+                    super::event::Event::loop_ind(iaddr).await;
                 }
-                super::event::Event::NeighborChange => {
-                    super::event::Event::neighbor_change(iaddr);
+                super::event::Event::NeighborChange(naddr) => {
+                    crate::util::debug("neighbor change event received.");
+                    super::event::Event::neighbor_change(iaddr,naddr).await;
                 }
                 super::event::Event::UnloopInd => {
-                    super::event::Event::unloop_ind(iaddr);
+                    crate::util::debug("unloop event received.");
+                    super::event::Event::unloop_ind(iaddr).await;
                 }
                 _ => {
                     crate::util::error("invalid event received,ignored.");

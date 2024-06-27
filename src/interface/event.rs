@@ -4,12 +4,14 @@ use tokio::{
     runtime::Handle,
     sync::{broadcast, RwLock},
 };
+
+use super::handle;
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub enum Event {
     InterfaceUp,
     WaitTimer,
     BackupSeen,
-    NeighborChange,
+    NeighborChange(net::Ipv4Addr),
     LoopInd(String),
     UnloopInd,
     InterfaceDown,
@@ -27,7 +29,7 @@ impl Event {
         let mut locked_handler = handler.write().await;
 
         let new_status = locked_handler.when_interface_up(iaddr).await;
-        super::set_status(iaddr, new_status);
+        super::set_status(iaddr, new_status).await;
     }
     pub async fn wait_timer(iaddr: net::Ipv4Addr) {
         let old_status = super::get_status(iaddr).await;
@@ -35,8 +37,8 @@ impl Event {
             crate::util::error("interface is not waiting.,wait_timer event ignored.");
             return;
         }
-        let new_status = select_dr_bdr().await;
-        super::set_status(iaddr, new_status);
+        let new_status = select_dr_bdr(iaddr).await;
+        super::set_status(iaddr, new_status).await;
     }
     pub async fn backup_seen(iaddr: net::Ipv4Addr) {
         let old_status = super::get_status(iaddr).await;
@@ -44,10 +46,10 @@ impl Event {
             crate::util::error("interface is not waiting.,backup_seen event ignored.");
             return;
         }
-        let new_status = select_dr_bdr().await;
-        super::set_status(iaddr, new_status);
+        let new_status = select_dr_bdr(iaddr).await;
+        super::set_status(iaddr, new_status).await;
     }
-    pub async fn neighbor_change(iaddr: net::Ipv4Addr) {
+    pub async fn neighbor_change(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr) {
         let old_status = super::get_status(iaddr).await;
         if old_status != super::status::Status::DR
             && old_status != super::status::Status::DRother
@@ -58,9 +60,9 @@ impl Event {
             );
             return;
         }
-        let new_status = select_dr_bdr().await;
-        super::set_status(iaddr, new_status);
-        //TODO: HERE TO START THE DD NEOGOIATION
+        let new_status = select_dr_bdr(iaddr).await;
+        super::set_status(iaddr, new_status).await;
+        handle::start_dd_negoation(iaddr, naddr).await;
     }
     pub async fn loop_ind(iaddr: net::Ipv4Addr) {
         let g_handlers = super::handle::HANDLE_MAP.read().await;
@@ -94,7 +96,7 @@ impl Event {
 
 unsafe impl Send for Event {}
 
-pub async fn select_dr_bdr() -> super::status::Status {
+pub async fn select_dr_bdr(iaddr: net::Ipv4Addr) -> super::status::Status {
     unimplemented!()
 }
 
@@ -104,7 +106,7 @@ impl Debug for Event {
             Event::InterfaceUp => write!(f, "Interface Up"),
             Event::WaitTimer => write!(f, "WaitTimer"),
             Event::BackupSeen => write!(f, "BackupSeen"),
-            Event::NeighborChange => write!(f, "NeighborChange"),
+            Event::NeighborChange(_) => write!(f, "NeighborChange"),
             Event::LoopInd(_) => write!(f, "LoopInd"),
             Event::UnloopInd => write!(f, "UnloopInd"),
             Event::InterfaceDown => write!(f, "InterfaceDown"),
@@ -121,7 +123,7 @@ lazy_static::lazy_static! {
 /// - ipv4_addr : the interface 's ipv4 addr
 /// - e : the event you want to send
 pub async fn send(ipv4_addr: net::Ipv4Addr, e: Event) {
-    let event_senders = EVENT_SENDERS.write().await;
+    let event_senders = EVENT_SENDERS.read().await;
     match event_senders.get(&ipv4_addr) {
         Some(sender) => match sender.send(e) {
             Ok(_) => {

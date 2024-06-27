@@ -1,6 +1,6 @@
 use std::net;
 
-use clap::{Arg, ArgMatches, Command};
+use clap::{builder::Str, Arg, ArgMatches, Command};
 use rustyline::{
     Completer, CompletionType, Config, Editor, Helper, Highlighter, Hinter, Validator,
 };
@@ -20,6 +20,9 @@ lazy_static::lazy_static! {
     static ref INTERFACE_DISPLAY_COMMAND : Command = Command::new("display")
     .about("Display interface")
     .arg(Arg::new("interface").help("Interface name").required(true));
+    static ref INTERFACE_SET_ARAE_COMMAND : Command = Command::new("set-area")
+    .arg(Arg::new("interface").help("Interface name").required(true))
+    .arg(Arg::new("area").help("Area id").required(true));
     static ref AREA_CREATE_COMMAND : Command = Command::new("create")
     .about("Create area").arg(Arg::new("area").help("Area id").required(true));
     static ref AREA_LIST_COMMAND : Command = Command::new("list")
@@ -36,6 +39,7 @@ lazy_static::lazy_static! {
     .subcommand(INTERFACE_UP_COMMAND.clone())
     .subcommand(INTERFACE_DOWN_COMMAND.clone())
     .subcommand(INTERFACE_LIST_COMMAND.clone())
+    .subcommand(INTERFACE_SET_ARAE_COMMAND.clone())
     .subcommand(INTERFACE_DISPLAY_COMMAND.clone());
     static ref EXIT_COMMAND : Command = Command::new("exit")
     .about("Exit the ospf cli");
@@ -81,14 +85,18 @@ async fn match_ospf_command(line: &str) {
 async fn match_area_command(args_match: &ArgMatches) {
     if let Some(sub_command_matches) = args_match.subcommand_matches("create") {
         let area_id = sub_command_matches
-            .get_one::<net::Ipv4Addr>("area")
+            .get_one::<String>("area")
+            .unwrap()
+            .parse::<net::Ipv4Addr>()
             .unwrap();
         crate::area::add(area_id.clone()).await;
     } else if let Some(_) = args_match.subcommand_matches("list") {
         crate::area::list().await;
     } else if let Some(sub_command_matches) = args_match.subcommand_matches("display") {
         let area_id = sub_command_matches
-            .get_one::<net::Ipv4Addr>("area")
+            .get_one::<String>("area")
+            .unwrap()
+            .parse::<net::Ipv4Addr>()
             .unwrap();
         crate::area::display(area_id.clone()).await;
     } else {
@@ -120,6 +128,14 @@ async fn match_interface_subcommand(args_match: &ArgMatches) {
     } else if let Some(sub_command_matches) = args_match.subcommand_matches("display") {
         let interface_name = sub_command_matches.get_one::<String>("interface").unwrap();
         crate::interface::display(interface_name.clone()).await;
+    } else if let Some(sub_command_matches) = args_match.subcommand_matches("set-area") {
+        let interface_name = sub_command_matches.get_one::<String>("interface").unwrap();
+        let area_id = sub_command_matches
+            .get_one::<String>("area")
+            .unwrap()
+            .parse::<net::Ipv4Addr>()
+            .unwrap();
+        //TODO set the interface's area id
     } else {
         INTERFACE_COMMAND
             .clone()

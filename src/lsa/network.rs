@@ -1,4 +1,3 @@
-
 #[derive(Clone)]
 pub struct NetworkLSA {
     pub header: super::Header,
@@ -6,9 +5,12 @@ pub struct NetworkLSA {
     pub attached_rtrs: Vec<u32>,
 }
 
+
+pub const NETWORK_LSA_TYPE: u8 = 2;
+
 impl NetworkLSA {
-    pub fn length(&self) -> usize{
-        super::Header::length() + 4 + self.attached_rtrs.len() * 4 
+    pub fn length(&self) -> usize {
+        super::Header::length() + 4 + self.attached_rtrs.len() * 4
     }
     pub fn to_be_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
@@ -19,8 +21,33 @@ impl NetworkLSA {
         }
         bytes
     }
+    pub fn try_from_be_bytes(payload: &[u8]) -> Option<Self> {
+        if payload.len() < super::Header::length() + 4 {
+            return None;
+        }
+        let header = super::Header::try_from_be_bytes(&payload[..super::Header::length()])?;
+        let mask = u32::from_be_bytes([
+            payload[super::Header::length()],
+            payload[super::Header::length() + 1],
+            payload[super::Header::length() + 2],
+            payload[super::Header::length() + 3],
+        ]);
+        let mut attached_rtrs = Vec::new();
+        let mut offset = super::Header::length() + 4;
+        while offset < payload.len() {
+            let rtr = u32::from_be_bytes([
+                payload[offset],
+                payload[offset + 1],
+                payload[offset + 2],
+                payload[offset + 3],
+            ]);
+            attached_rtrs.push(rtr);
+            offset += 4;
+        }
+        Some(Self {
+            header,
+            mask,
+            attached_rtrs,
+        })
+    }
 }
-
-pub const NETWORK_LSA_TYPE: u8 = 2;
-
-

@@ -166,18 +166,18 @@ impl OspfPacket {
     pub async fn received<'a>(
         ipv4_packet: Ipv4Packet<'a>,
         ospf_packet: OspfPacket,
-        ipv4_addr: net::Ipv4Addr,
+        iaddr: net::Ipv4Addr,
     ) {
         match ospf_packet {
             OspfPacket::Hello(hello_packet) => {
                 tokio::spawn(Hello::received(
                     hello_packet,
                     ipv4_packet.get_source(),
-                    ipv4_addr,
+                    iaddr,
                 ));
             }
             OspfPacket::DD(dd_packet) => {
-                tokio::spawn(DD::received(dd_packet, ipv4_packet.get_source(), ipv4_addr));
+                tokio::spawn(DD::received(dd_packet, ipv4_packet.get_source(), iaddr));
             }
             OspfPacket::LSR(lsr_packet) => {
                 tokio::spawn(Lsr::received(lsr_packet));
