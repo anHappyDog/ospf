@@ -7,9 +7,12 @@ use pnet::packet::{
 use tokio::sync::RwLock;
 
 use crate::{
-    interface::{self, NetworkType, INTERFACES},
+    area,
+    interface::{self, NetworkType},
     lsa, neighbor, util, OSPF_IP_PROTOCOL, OSPF_VERSION,
 };
+
+use super::ospf_packet_checksum;
 
 pub const HELLO_TYPE: u8 = 1;
 
@@ -27,203 +30,46 @@ pub struct Hello {
 }
 
 impl Hello {
+    /// create and fill a new hello packet.
+    pub async fn new(iaddr: net::Ipv4Addr) -> Self {
+        let mut packet = Self::empty();
+        let interfaces_map = interface::INTERFACE_MAP.read().await;
+        let interface = interfaces_map.get(&iaddr).unwrap();
+        packet.header.router_id = crate::ROUTER_ID.clone().into();
+        packet.header.area_id = interface.area_id;
+        packet.network_mask = interface.mask.into();
+        packet.hello_interval = interface.hello_interval;
+        packet.options = interface.options;
+        packet.router_priority = interface.router_priority;
+        packet.router_dead_interval = interface.router_dead_interval;
+        packet.designated_router = {
+            let area_drs = crate::area::DR_MAP.read().await;
+            let dr = area_drs.get(&interface.area_id).unwrap().clone();
+            dr.into()
+        };
+        packet.backup_designated_router = {
+            let area_bdrs = crate::area::BDR_MAP.read().await;
+            let bdr = area_bdrs.get(&interface.area_id).unwrap().clone();
+            bdr.into()
+        };
+        let int_neighbors = neighbor::INT_NEIGHBORS_MAP.read().await;
+        let int_neighbors = int_neighbors.get(&iaddr).unwrap();
+        let int_neighbors = int_neighbors.read().await;
+        int_neighbors.iter().for_each(|neighbor| {
+            packet.neighbors.push(*neighbor);
+        });
+        packet.header.packet_length = packet.length() as u16;
+        packet.header.checksum = ospf_packet_checksum(&packet.to_be_bytes());
+        packet
+    }
+
     /// remember the process for the neighbors in the packet may be not processed properly.
     pub async fn received(
         hello_packet: Hello,
         packet_source_addr: net::Ipv4Addr,
         int_ipv4_addr: net::Ipv4Addr,
     ) {
-        let interfaces_map = INTERFACES.read().await;
-        let interface = match interfaces_map.get(&int_ipv4_addr) {
-            Some(interface) => interface,
-            None => {
-                util::error("Interface not found.");
-                return ();
-            }
-        };
-        let locked_interface = interface.read().await;
-        let hello_interval = locked_interface.hello_interval;
-        let area_id = locked_interface.area_id;
-        let int_ipv4_addr = locked_interface.ip;
-        let network_type = locked_interface.network_type;
-        let options = locked_interface.options;
-        let router_dead_interval = locked_interface.router_dead_interval;
-        drop(locked_interface);
-        drop(interfaces_map);
-        if hello_packet.header.version != OSPF_VERSION || hello_packet.header.area_id != area_id {
-            util::error("Invalid ospf version or in-compatible area id.");
-            return;
-        }
-        // currently omit more detailed checks.
-        if hello_packet.hello_interval != hello_interval {
-            util::error("Invalid hello interval for the received hello ospf packet..");
-            return;
-        }
-        if hello_packet.options != options {
-            util::error("Invalid options for the received hello ospf packet.");
-            return;
-        }
-        if hello_packet.router_dead_interval != router_dead_interval {
-            util::error("Invalid router dead interval for the received hello ospf packet.");
-            return;
-        }
-        // now we get the right ospf hello packet.
-        let (source_addr, neighbor_id) = match network_type {
-            NetworkType::Broadcast | NetworkType::NBMA | NetworkType::PointToMultipoint => {
-                (packet_source_addr, hello_packet.header.router_id.into())
-            }
-            NetworkType::PointToPoint | NetworkType::VirtualLink => (
-                net::Ipv4Addr::from(hello_packet.header.router_id),
-                packet_source_addr,
-            ),
-        };
-        let neighbors = neighbor::NEIGHBORS.write().await;
-        let int_neighbors = match neighbors.get(&int_ipv4_addr) {
-            Some(int_neighbors) => int_neighbors,
-            None => {
-                util::error("Interface neighbors not found.");
-                return;
-            }
-        };
-        let mut locked_int_neighbors = int_neighbors.write().await;
-        let mut locked_neighbor_inactive_timer = neighbor::handle::INACTIVE_TIMERS.write().await;
-        locked_neighbor_inactive_timer.insert(source_addr, None);
-        drop(locked_neighbor_inactive_timer);
 
-        let former_priority = if !locked_int_neighbors.contains_key(&source_addr) {
-            let neighbor = Arc::new(RwLock::new(neighbor::Neighbor {
-                state: neighbor::status::Status::Down,
-                master: false,
-                dd_seq: lsa::INITIAL_SEQUENCE_NUMBER as u32,
-                last_dd: None,
-                id: neighbor_id,
-                priority: hello_packet.router_priority.into(),
-                ipv4_addr: source_addr,
-                options: hello_packet.options,
-                dr: hello_packet.designated_router.into(),
-                bdr: hello_packet.backup_designated_router.into(),
-                lsa_retrans_list: Vec::new(),
-                summary_list: Vec::new(),
-                lsr_list: Vec::new(),
-            }));
-
-            locked_int_neighbors.insert(source_addr, neighbor.clone());
-            neighbor::event::add_sender(source_addr).await;
-            let mut sm = neighbor::handle::STATUS_MACHINES.write().await;
-            sm.insert(
-                source_addr,
-                Some(tokio::spawn(neighbor::status::changed(
-                    network_type,
-                    source_addr,
-                    int_ipv4_addr,
-                ))),
-            );
-            hello_packet.router_priority
-        } else {
-            let neighbor = match locked_int_neighbors.get(&source_addr) {
-                Some(neighbor) => neighbor,
-                None => {
-                    util::error("Neighbor not found.");
-                    return;
-                }
-            };
-            let locked_neighbor = neighbor.read().await;
-            locked_neighbor.priority as u8
-        };
-        drop(locked_int_neighbors);
-        drop(neighbors);
-        neighbor::event::send(source_addr, neighbor::event::Event::HelloReceived).await;
-        if hello_packet.neighbors.contains(&int_ipv4_addr.into()) {
-            neighbor::event::send(source_addr, neighbor::event::Event::TwoWayReceived).await;
-            if former_priority != hello_packet.router_priority {
-                interface::event::send(int_ipv4_addr, interface::event::Event::NeighborChange)
-                    .await;
-            }
-            let ints = interface::INTERFACES.read().await;
-            let int = match ints.get(&int_ipv4_addr) {
-                Some(int) => int,
-                None => {
-                    util::error("Interface not found.");
-                    return;
-                }
-            };
-            let locked_int = int.read().await;
-            let int_status = locked_int.status;
-            drop(locked_int);
-            drop(ints);
-            if int_status == interface::status::Status::Waiting
-                && hello_packet.designated_router == source_addr.into()
-                && u32::from(hello_packet.backup_designated_router) == 0
-            {
-                interface::event::send(int_ipv4_addr, interface::event::Event::BackupSeen).await;
-            } else {
-                let locked_neighbors = neighbor::NEIGHBORS.read().await;
-                let int_neighbors = match locked_neighbors.get(&int_ipv4_addr) {
-                    Some(int_neighbors) => int_neighbors,
-                    None => {
-                        util::error("Interface neighbors not found.");
-                        return;
-                    }
-                };
-                let locked_int_neighbors = int_neighbors.read().await;
-                let int_neighbor = match locked_int_neighbors.get(&source_addr) {
-                    Some(int_neighbor) => int_neighbor,
-                    None => {
-                        util::error("Neighbor not found.");
-                        return;
-                    }
-                };
-                let locked_int_neighbor = int_neighbor.read().await;
-                let former_dr = locked_int_neighbor.dr;
-                drop(locked_int_neighbor);
-                drop(locked_int_neighbors);
-                drop(locked_neighbors);
-                if hello_packet.designated_router != former_dr.into()
-                    && (former_dr == source_addr || former_dr == source_addr)
-                {
-                    interface::event::send(int_ipv4_addr, interface::event::Event::NeighborChange)
-                        .await;
-                }
-            }
-
-            //
-
-            if hello_packet.backup_designated_router == source_addr.into()
-                && int_status == interface::status::Status::Waiting
-            {
-                interface::event::send(int_ipv4_addr, interface::event::Event::BackupSeen).await;
-            } else {
-                let locked_neighbors = neighbor::NEIGHBORS.read().await;
-                let int_neighbors = match locked_neighbors.get(&int_ipv4_addr) {
-                    Some(int_neighbors) => int_neighbors,
-                    None => {
-                        util::error("Interface neighbors not found.");
-                        return;
-                    }
-                };
-                let locked_int_neighbors = int_neighbors.read().await;
-                let int_neighbor = match locked_int_neighbors.get(&source_addr) {
-                    Some(int_neighbor) => int_neighbor,
-                    None => {
-                        util::error("Neighbor not found.");
-                        return;
-                    }
-                };
-                let locked_int_neighbor = int_neighbor.read().await;
-                let former_bdr = locked_int_neighbor.bdr;
-                drop(locked_int_neighbor);
-                drop(locked_int_neighbors);
-                drop(locked_neighbors);
-                if hello_packet.backup_designated_router != former_bdr.into()
-                    && (former_bdr == source_addr || former_bdr == source_addr)
-                {
-                    interface::event::send(int_ipv4_addr, interface::event::Event::NeighborChange)
-                        .await;
-                }
-            }
-        } else {
-            neighbor::event::send(source_addr, neighbor::event::Event::OneWayReceived).await;
-        }
     }
     pub fn try_from_be_bytes(payload: &[u8]) -> Option<Self> {
         let ospf_header = match super::OspfHeader::try_from_be_bytes(payload) {
@@ -297,12 +143,16 @@ impl Hello {
     pub fn length(&self) -> usize {
         44 + 4 * self.neighbors.len()
     }
-    pub fn build_ipv4_packet<'a>(
+    pub async fn build_ipv4_packet<'a>(
         &'a self,
         buffer: &'a mut Vec<u8>,
         src_ipv4_addr: net::Ipv4Addr,
-        network_type: interface::NetworkType,
     ) -> Result<Ipv4Packet<'a>, &'static str> {
+        let network_type = {
+            let interfaces_map = interface::INTERFACE_MAP.read().await;
+            let interface = interfaces_map.get(&src_ipv4_addr).unwrap();
+            interface.network_type
+        };
         let mut packet = match MutableIpv4Packet::new(buffer.as_mut_slice()) {
             Some(packet) => packet,
             None => return Err("Failed to create MutableIpv4Packet"),

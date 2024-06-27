@@ -1,3 +1,5 @@
+use std::net;
+
 use clap::{Arg, ArgMatches, Command};
 use rustyline::{
     Completer, CompletionType, Config, Editor, Helper, Highlighter, Hinter, Validator,
@@ -77,14 +79,18 @@ async fn match_ospf_command(line: &str) {
 }
 
 async fn match_area_command(args_match: &ArgMatches) {
-    if let Some(sub_command_matches) = args_match.sub_command_matches("create") {
-        let area_id = sub_command_matches.get_one::<String>("area").unwrap();
-        area::create(area_id.parse().unwrap()).await;
+    if let Some(sub_command_matches) = args_match.subcommand_matches("create") {
+        let area_id = sub_command_matches
+            .get_one::<net::Ipv4Addr>("area")
+            .unwrap();
+        crate::area::add(area_id.clone()).await;
     } else if let Some(_) = args_match.subcommand_matches("list") {
-        area::list().await;
+        crate::area::list().await;
     } else if let Some(sub_command_matches) = args_match.subcommand_matches("display") {
-        let area_id = sub_command_matches.get_one::<String>("area").unwrap();
-        area::Area::display(area_id.parse().unwrap()).await;
+        let area_id = sub_command_matches
+            .get_one::<net::Ipv4Addr>("area")
+            .unwrap();
+        crate::area::display(area_id.clone()).await;
     } else {
         AREA_COMMAND
             .clone()
@@ -99,21 +105,21 @@ async fn match_interface_subcommand(args_match: &ArgMatches) {
 
         interface::event::send_by_name(
             interface_name.clone(),
-            interface::event::Event::InterfaceUp(interface_name.clone()),
+            interface::event::Event::InterfaceUp,
         )
         .await;
     } else if let Some(sub_command_matches) = args_match.subcommand_matches("down") {
         let interface_name = sub_command_matches.get_one::<String>("interface").unwrap();
         interface::event::send_by_name(
             interface_name.clone(),
-            interface::event::Event::InterfaceDown(interface_name.clone()),
+            interface::event::Event::InterfaceDown,
         )
         .await;
     } else if let Some(_) = args_match.subcommand_matches("list") {
-        interface::list().await;
+        crate::interface::list().await;
     } else if let Some(sub_command_matches) = args_match.subcommand_matches("display") {
         let interface_name = sub_command_matches.get_one::<String>("interface").unwrap();
-        interface::Interface::display(interface_name.clone()).await;
+        crate::interface::display(interface_name.clone()).await;
     } else {
         INTERFACE_COMMAND
             .clone()

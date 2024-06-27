@@ -192,7 +192,6 @@ impl OspfPacket {
     }
     pub fn try_from_ipv4_packet(
         ipv4_packet: &ipv4::Ipv4Packet,
-        interface_name: String,
     ) -> Result<crate::packet::OspfPacket, &'static str> {
         match ipv4_packet.get_next_level_protocol() {
             ip::IpNextHeaderProtocol(OSPF_IP_PROTOCOL) => {

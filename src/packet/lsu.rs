@@ -10,7 +10,7 @@ use crate::{interface, OSPF_IP_PROTOCOL};
 pub const LSU_TYPE: u8 = 4;
 
 pub struct Lsu {
-    pub header : super::OspfHeader,
+    pub header: super::OspfHeader,
     pub lsa_count: u32,
     pub lsa_list: Vec<crate::lsa::Lsa>,
 }
@@ -20,7 +20,9 @@ impl Lsu {
         unimplemented!()
     }
     pub fn length(&self) -> usize {
-        super::OspfHeader::length() + 4 + self.lsa_list.iter().fold(0, |acc, lsa| acc + lsa.length())
+        super::OspfHeader::length()
+            + 4
+            + self.lsa_list.iter().fold(0, |acc, lsa| acc + lsa.length())
     }
     pub async fn received(lsu_packet: Lsu) {
         unimplemented!()
@@ -63,7 +65,7 @@ impl Lsu {
                 packet.set_destination([224, 0, 0, 5].into());
             }
             interface::NetworkType::VirtualLink => {
-                packet.set_destination([224, 0, 0, 5].into());
+                packet.set_destination(destination_addr);
             }
         }
         packet.set_payload(&self.to_be_bytes());
