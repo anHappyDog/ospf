@@ -2,7 +2,9 @@ use std::{collections::HashMap, net, sync::Arc};
 
 use tokio::sync::{broadcast, RwLock};
 
-use crate::interface;
+use crate::interface::{self, handle::start_dd_negoation};
+
+use super::handle::abort_inactive_timer;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Event {
@@ -49,13 +51,13 @@ impl Event {
     pub async fn hello_received(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr) {
         let old_status = super::get_status(iaddr, naddr).await;
         if old_status == super::status::Status::Down {
-            //TODO  reset the inactive timer
+            super::handle::start_inactive_timer(iaddr, naddr).await;
             super::set_status(iaddr, naddr, super::status::Status::Init).await;
         } else if old_status == super::status::Status::Attempt {
-            //TODO reset the inactive timer
+            super::handle::start_inactive_timer(iaddr, naddr).await;
             super::set_status(iaddr, naddr, super::status::Status::Init).await;
         } else if old_status >= super::status::Status::Init {
-            //TOOD reset the inactive timer
+            super::handle::start_inactive_timer(iaddr, naddr).await;
         } else {
             crate::util::error("hello_received: invalid status,ignored.");
         }
@@ -75,17 +77,15 @@ impl Event {
             crate::util::error("start: invalid status,ignored.");
             return;
         }
-        //TODO reset the inactive timer
+        super::handle::start_inactive_timer(iaddr, naddr).await;
         super::set_status(iaddr, naddr, super::status::Status::Attempt).await;
     }
     pub async fn two_way_received(naddr: net::Ipv4Addr, iaddr: net::Ipv4Addr) {
         let old_status = super::get_status(iaddr, naddr).await;
         if super::status::Status::Init == old_status {
-            //TODO judge if need to build the adjacency,if not,turn to 2-way
-            // otherwise, turn to Exstart.
-            if true {
+            if super::is_adjacent(iaddr, naddr).await {
                 // need to build the adjacency
-
+                start_dd_negoation(iaddr, naddr).await;
                 super::set_status(iaddr, naddr, super::status::Status::ExStart).await;
             } else {
                 // do not need to build the adjacency
@@ -102,6 +102,7 @@ impl Event {
         if super::status::Status::ExStart == old_status {
             //TODO start to exchange the database description packets,first fill
             // the neighbor's three lists, beware the virtuallink and other network type
+            abort_inactive_timer(iaddr, naddr).await;
         } else {
             crate::util::error("negotiation_done: invalid status,ignored.");
         }
@@ -110,12 +111,9 @@ impl Event {
     pub async fn exchange_done(naddr: net::Ipv4Addr, iaddr: net::Ipv4Addr) {
         let old_status = super::get_status(iaddr, naddr).await;
         if super::status::Status::Exchange == old_status {
-            //TODO check the neighbor's lsr list, if empty,turn to full ,otherwise ,turn to loading
-            if true {
-                // empty
+            if super::is_lsr_list_empty(iaddr, naddr).await {
                 super::set_status(iaddr, naddr, super::status::Status::Full).await;
             } else {
-                // not empty
                 super::set_status(iaddr, naddr, super::status::Status::Loading).await;
                 //TODO send the lsr packet to the neighbor
             }
@@ -127,7 +125,16 @@ impl Event {
         let old_status = super::get_status(iaddr, naddr).await;
         if super::status::Status::Exchange <= old_status {
             super::set_status(iaddr, naddr, super::status::Status::ExStart).await;
-            //TODO clear the three lists of the neighbor,and restart to dd negotiation
+            let _ = tokio::join!(
+                tokio::spawn(super::handle::abort_inactive_timer(
+                    iaddr.clone(),
+                    naddr.clone()
+                )),
+                tokio::spawn(super::clear_lsa_retrans_list(iaddr.clone(), naddr.clone())),
+                tokio::spawn(super::clear_lsr_list(iaddr.clone(), naddr.clone())),
+                tokio::spawn(super::clear_summary_list(iaddr.clone(), naddr.clone()))
+            );
+            tokio::join!()
         } else {
             crate::util::error("bad_ls_req: invalid status,ignored.");
         }
@@ -143,19 +150,22 @@ impl Event {
     pub async fn adj_ok(naddr: net::Ipv4Addr, iaddr: net::Ipv4Addr) {
         let old_status = super::get_status(iaddr, naddr).await;
         if super::status::Status::TwoWay == old_status {
-            //TODO decide whether need to build the adjacency
-            if true {
-                // build the adjacency
+            if super::is_adjacent(iaddr, naddr).await {
+                // start to build the adjacency
+                start_dd_negoation(iaddr, naddr).await;
                 super::set_status(iaddr, naddr, super::status::Status::ExStart).await;
             } else {
                 crate::util::debug("adj_ok: do not need to build the adjacency,ignored.");
             }
         } else if super::status::Status::ExStart <= old_status {
-            //TODO decide whether need to build the adjacency
-            if true {
+            if super::is_adjacent(iaddr, naddr).await {
                 crate::util::debug("adj_ok: no need to destroy the adjacency.");
             } else {
-                //TODO destroy the adjacency: clear the three lists of the neighbor
+                let _ = tokio::join!(
+                    tokio::spawn(super::clear_lsa_retrans_list(iaddr.clone(), naddr.clone())),
+                    tokio::spawn(super::clear_lsr_list(iaddr.clone(), naddr.clone())),
+                    tokio::spawn(super::clear_summary_list(iaddr.clone(), naddr.clone()))
+                );
                 super::set_status(iaddr, naddr, super::status::Status::TwoWay).await;
             }
         } else {
@@ -166,7 +176,16 @@ impl Event {
         let old_status = super::get_status(iaddr, naddr).await;
         if super::status::Status::Exchange <= old_status {
             super::set_status(iaddr, naddr, super::status::Status::ExStart).await;
-            //TODO clear the three lists of the neighbor,and restart to dd negotiation
+            let _ = tokio::join!(
+                tokio::spawn(super::handle::abort_inactive_timer(
+                    iaddr.clone(),
+                    naddr.clone()
+                )),
+                tokio::spawn(super::clear_lsa_retrans_list(iaddr.clone(), naddr.clone())),
+                tokio::spawn(super::clear_lsr_list(iaddr.clone(), naddr.clone())),
+                tokio::spawn(super::clear_summary_list(iaddr.clone(), naddr.clone()))
+            );
+            interface::handle::start_dd_negoation(iaddr, naddr).await;
         } else {
             crate::util::error("seq_number_mismatch: invalid status,ignored.");
         }
@@ -182,15 +201,35 @@ impl Event {
         }
     }
     pub async fn kill_nbr(naddr: net::Ipv4Addr, iaddr: net::Ipv4Addr) {
-        //TODO clear the three lists of the neighbor,and abort the inactive timer
+        let _ = tokio::join!(
+            tokio::spawn(super::handle::abort_inactive_timer(
+                iaddr.clone(),
+                naddr.clone()
+            )),
+            tokio::spawn(super::clear_lsa_retrans_list(iaddr.clone(), naddr.clone())),
+            tokio::spawn(super::clear_lsr_list(iaddr.clone(), naddr.clone())),
+            tokio::spawn(super::clear_summary_list(iaddr.clone(), naddr.clone()))
+        );
         super::set_status(iaddr, naddr, super::status::Status::Down).await;
     }
     pub async fn inactivity_timer(naddr: net::Ipv4Addr, iaddr: net::Ipv4Addr) {
-        //TODO clear the three lists of the neighbor
+        let _ = tokio::join!(
+            tokio::spawn(super::clear_lsa_retrans_list(iaddr.clone(), naddr.clone())),
+            tokio::spawn(super::clear_lsr_list(iaddr.clone(), naddr.clone())),
+            tokio::spawn(super::clear_summary_list(iaddr.clone(), naddr.clone()))
+        );
         super::set_status(iaddr, naddr, super::status::Status::Down).await;
     }
     pub async fn ll_down(naddr: net::Ipv4Addr, iaddr: net::Ipv4Addr) {
-        //TODO clear the three lists of the neighbor,and abort the inactive timer
+        let _ = tokio::join!(
+            tokio::spawn(super::handle::abort_inactive_timer(
+                iaddr.clone(),
+                naddr.clone()
+            )),
+            tokio::spawn(super::clear_lsa_retrans_list(iaddr.clone(), naddr.clone())),
+            tokio::spawn(super::clear_lsr_list(iaddr.clone(), naddr.clone())),
+            tokio::spawn(super::clear_summary_list(iaddr.clone(), naddr.clone()))
+        );
         super::set_status(iaddr, naddr, super::status::Status::Down).await;
     }
 }

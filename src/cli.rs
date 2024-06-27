@@ -135,7 +135,7 @@ async fn match_interface_subcommand(args_match: &ArgMatches) {
             .unwrap()
             .parse::<net::Ipv4Addr>()
             .unwrap();
-        //TODO set the interface's area id
+        interface::set_area_id_by_name(interface_name.clone(), area_id).await;
     } else {
         INTERFACE_COMMAND
             .clone()

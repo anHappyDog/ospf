@@ -165,6 +165,42 @@ pub async fn save_last_dd(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr, dd: crate:
     locked_last_dd.insert(naddr, dd);
 }
 
+pub async fn is_lsr_list_empty(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr) -> bool {
+    let lsr_list = NEIGHBOR_LSR_LIST_MAP.read().await;
+    let lsr = lsr_list.get(&iaddr).unwrap();
+    let locked_lsr = lsr.read().await;
+    let lsr = locked_lsr.get(&naddr).unwrap();
+    let locked_lsr = lsr.read().await;
+    locked_lsr.is_empty()
+}
+
+pub async fn clear_lsr_list(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr) {
+    let lsr_list = NEIGHBOR_LSR_LIST_MAP.read().await;
+    let lsr = lsr_list.get(&iaddr).unwrap();
+    let locked_lsr = lsr.read().await;
+    let lsr = locked_lsr.get(&naddr).unwrap();
+    let mut locked_lsr = lsr.write().await;
+    locked_lsr.clear();
+}
+
+pub async fn clear_summary_list(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr) {
+    let summary_list = NEIGHBOR_SUMMARY_LIST_MAP.read().await;
+    let summary = summary_list.get(&iaddr).unwrap();
+    let locked_summary = summary.read().await;
+    let summary = locked_summary.get(&naddr).unwrap();
+    let mut locked_summary = summary.write().await;
+    locked_summary.clear();
+}
+
+pub async fn clear_lsa_retrans_list(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr) {
+    let lsa_retrans_list = NEIHGBOR_LSA_RETRANS_LIST_MAP.read().await;
+    let lsa_retrans = lsa_retrans_list.get(&iaddr).unwrap();
+    let locked_lsa_retrans = lsa_retrans.read().await;
+    let lsa_retrans = locked_lsa_retrans.get(&naddr).unwrap();
+    let mut locked_lsa_retrans = lsa_retrans.write().await;
+    locked_lsa_retrans.clear();
+}
+
 pub async fn is_duplicated_dd(
     iaddr: net::Ipv4Addr,
     naddr: net::Ipv4Addr,
@@ -196,7 +232,6 @@ pub async fn get_options(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr) -> u8 {
     let locked_neighbor = neighbor.read().await;
     locked_neighbor.options
 }
-
 
 pub async fn set_master(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr, master: bool) {
     let int_neighbors = INT_NEIGHBORS_MAP.read().await;
@@ -245,6 +280,16 @@ pub async fn add(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr, neighbor: Neighbor)
     locked_lsr_list.insert(naddr, Arc::new(RwLock::new(Vec::new())));
     drop(locked_lsr_list);
     drop(lsr_list);
+
+    let handle_list = handle::HANDLE_MAP.read().await;
+    let n_handle_list = handle_list.get(&iaddr).unwrap();
+    let mut locked_handle_list = n_handle_list.write().await;
+    locked_handle_list.insert(naddr, handle::Handle::new(naddr, iaddr));
+}
+
+pub async fn is_adjacent(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr) -> bool {
+    
+    false
 }
 
 pub async fn init(iaddrs: Vec<net::Ipv4Addr>) {

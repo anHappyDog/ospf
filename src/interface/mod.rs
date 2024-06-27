@@ -228,6 +228,12 @@ pub async fn init() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+pub async fn get_router_dead_interval(iaddr: net::Ipv4Addr) -> u32 {
+    let interface_map = INTERFACE_MAP.read().await;
+    let interface = interface_map.get(&iaddr).unwrap();
+    interface.router_dead_interval
+}
+
 pub async fn get_area_id(iaddr: net::Ipv4Addr) -> net::Ipv4Addr {
     let interface_map = INTERFACE_MAP.read().await;
     let interface = interface_map.get(&iaddr).unwrap();
@@ -247,6 +253,19 @@ pub async fn set_status(iaddr: net::Ipv4Addr, status: status::Status) {
     let mut locked_status = int_status.write().await;
     *locked_status = status;
 }
+
+pub async fn set_area_id(iaddr: net::Ipv4Addr,area_id : net::Ipv4Addr) {
+    let mut interface_map = INTERFACE_MAP.write().await;
+    let interface = interface_map.get_mut(&iaddr).unwrap();
+    interface.area_id = area_id;
+}
+
+pub async fn set_area_id_by_name(iname : String,area_id : net::Ipv4Addr) {
+    let name_map = NAME_MAP.read().await;
+    let iaddr = name_map.get(&iname).unwrap();
+    set_area_id(*iaddr,area_id).await;
+}
+
 
 pub async fn send_neighbor_killnbr(iaddr: net::Ipv4Addr) {
     let neighbors_map = neighbor::INT_NEIGHBORS_MAP.read().await;
