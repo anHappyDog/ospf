@@ -1,5 +1,6 @@
 use std::net;
 
+use rustyline::Event;
 use tokio::sync::broadcast;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -24,43 +25,56 @@ pub async fn changed(naddr: net::Ipv4Addr, iaddr: net::Ipv4Addr) {
         match event_rx.recv().await {
             Ok(event) => match event {
                 super::event::Event::HelloReceived => {
-                    super::event::Event::hello_received().await;
+                    crate::util::debug(&format!("HelloReceived: {}", naddr));
+                    super::event::Event::hello_received(naddr).await;
                 }
                 super::event::Event::Start => {
-                    super::event::Event::start().await;
+                    crate::util::debug(&format!("Start: {}", naddr));
+                    super::event::Event::start(naddr, iaddr).await;
                 }
                 super::event::Event::TwoWayReceived => {
-                    super::event::Event::two_way_received().await;
+                    crate::util::debug(&format!("TwoWayReceived: {}", naddr));
+                    super::event::Event::two_way_received(naddr, iaddr).await;
                 }
                 super::event::Event::NegotiationDone => {
-                    super::event::Event::negotiation_done().await;
+                    crate::util::debug(&format!("NegotiationDone: {}", naddr));
+                    super::event::Event::negotiation_done(naddr, iaddr).await;
                 }
                 super::event::Event::ExchangeDone => {
-                    super::event::Event::exchange_done().await;
+                    crate::util::debug(&format!("ExchangeDone: {}", naddr));
+                    super::event::Event::exchange_done(naddr, iaddr).await;
                 }
                 super::event::Event::BadLSReq => {
-                    super::event::Event::bad_ls_req().await;
+                    crate::util::debug(&format!("BadLSReq: {}", naddr));
+                    super::event::Event::bad_ls_req(naddr, iaddr).await;
                 }
                 super::event::Event::LoadingDone => {
-                    super::event::Event::loading_done().await;
+                    crate::util::debug(&format!("LoadingDone: {}", naddr));
+                    super::event::Event::loading_done(naddr).await;
                 }
                 super::event::Event::AdjOk => {
-                    super::event::Event::adj_ok().await;
+                    crate::util::debug(&format!("AdjOk: {}", naddr));
+                    super::event::Event::adj_ok(naddr, iaddr).await;
                 }
                 super::event::Event::SeqNumberMismatch => {
-                    super::event::Event::seq_number_mismatch().await;
+                    crate::util::debug(&format!("SeqNumberMismatch: {}", naddr));
+                    super::event::Event::seq_number_mismatch(naddr, iaddr).await;
                 }
                 super::event::Event::OneWayReceived => {
-                    super::event::Event::one_way_received().await;
-                }
-                super::event::Event::KillNbr => {
-                    super::event::Event::kill_nbr().await;
+                    crate::util::debug(&format!("OneWayReceived: {}", naddr));
+                    super::event::Event::one_way_received(naddr).await;
                 }
                 super::event::Event::InactivityTimer => {
-                    super::event::Event::inactivity_timer().await;
+                    crate::util::debug(&format!("InactivityTimer: {}", naddr));
+                    super::event::Event::inactivity_timer(naddr).await;
+                }
+                super::event::Event::KillNbr => {
+                    crate::util::debug(&format!("KillNbr: {}", naddr));
+                    super::event::Event::kill_nbr(naddr).await;
                 }
                 super::event::Event::LLDown => {
-                    super::event::Event::ll_down().await;
+                    crate::util::debug(&format!("LLDown: {}", naddr));
+                    super::event::Event::ll_down(naddr).await;
                 }
             },
             Err(e) => {

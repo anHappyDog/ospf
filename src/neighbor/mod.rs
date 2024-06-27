@@ -19,7 +19,7 @@ lazy_static::lazy_static! {
     pub static ref INT_NEIGHBORS_MAP : Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<Vec<u32>>>>>> = Arc::new(RwLock::new(HashMap::new()));
 }
 
-#[derive(Clone,Copy)]
+#[derive(Clone, Copy)]
 pub struct Neighbor {
     pub master: bool,
     pub dd_seq: u32,
@@ -32,6 +32,20 @@ pub struct Neighbor {
 }
 
 impl Neighbor {}
+
+pub async fn get_status(naddr: net::Ipv4Addr) -> status::Status {
+    let neighbor_status_map = NEIGHBOR_STATUS_MAP.read().await;
+    let status = neighbor_status_map.get(&naddr).unwrap();
+    let status = status.read().await;
+    *status
+}
+
+pub async fn set_status(naddr: net::Ipv4Addr, new_status: status::Status) {
+    let neighbor_status_map = NEIGHBOR_STATUS_MAP.read().await;
+    let status = neighbor_status_map.get(&naddr).unwrap();
+    let mut status = status.write().await;
+    *status = new_status;
+}
 
 pub async fn add(addr: net::Ipv4Addr, neighbor: Neighbor) {
     let mut neighbor_map = NEIGHBOR_MAP.write().await;
