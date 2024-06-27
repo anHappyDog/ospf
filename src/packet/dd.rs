@@ -74,7 +74,7 @@ impl DD {
         packet.flags = dd_flags;
         packet.dd_sequence_number = seqno;
         // TODO fill the lsa_headers,but remember can not exceed the mtu
-
+        
         packet.header.packet_length = packet.length() as u16;
         packet.header.checksum = ospf_packet_checksum(&packet.to_be_bytes());
         packet

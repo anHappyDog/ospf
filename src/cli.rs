@@ -1,6 +1,6 @@
 use std::net;
 
-use clap::{builder::Str, Arg, ArgMatches, Command};
+use clap::{ Arg, ArgMatches, Command};
 use rustyline::{
     Completer, CompletionType, Config, Editor, Helper, Highlighter, Hinter, Validator,
 };

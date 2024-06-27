@@ -86,44 +86,6 @@ impl Header {
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct LsaIdentifer {
-    pub lsa_type: u8,
-    pub link_state_id: u32,
-    pub advertising_router: u32,
-}
-
-#[derive(Clone)]
-pub enum LSA {
-    Router(router::RouterLSA),
-    Network(network::NetworkLSA),
-    Summary(summary::SummaryLSA),
-    ASExternal(as_external::ASExternalLSA),
-}
-
-lazy_static::lazy_static! {
-    /// the area_id is the key
-    pub static ref LSDB : Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<LsaDb>>>>> = Arc::new(RwLock::new(HashMap::new()));
-    pub static ref LSDB2 : Arc<RwLock<HashMap<LsaIdentifer,Lsa>>> = Arc::new(RwLock::new(HashMap::new()));
-}
-
-pub struct LsaDb {
-    pub router_lsa: HashMap<LsaIdentifer, router::RouterLSA>,
-    pub network_lsa: HashMap<LsaIdentifer, network::NetworkLSA>,
-    pub summary_lsa: HashMap<LsaIdentifer, summary::SummaryLSA>,
-    pub as_external_lsa: HashMap<LsaIdentifer, as_external::ASExternalLSA>,
-}
-
-impl LsaDb {
-    pub fn empty() -> Self {
-        Self {
-            router_lsa: HashMap::new(),
-            network_lsa: HashMap::new(),
-            summary_lsa: HashMap::new(),
-            as_external_lsa: HashMap::new(),
-        }
-    }
-}
 
 pub enum Lsa {
     Router(router::RouterLSA),

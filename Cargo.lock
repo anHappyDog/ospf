@@ -369,6 +369,7 @@ dependencies = [
  "lazy_static",
  "pnet",
  "rustyline",
+ "socket2",
  "tokio",
 ]
 

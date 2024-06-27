@@ -1,3 +1,4 @@
+pub mod lsdb;
 use std::net;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
@@ -5,8 +6,6 @@ use tokio::sync::RwLock;
 lazy_static::lazy_static! {
     // THE KEY IS THE AREA ID
     pub static ref AREA_MAP: Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<Area>>>>> = Arc::new(RwLock::new(HashMap::new()));
-    // REMEMBER THE LSDB IN THE AREA.
-    pub static ref LSDB_MAP: Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<u32>>>>> = Arc::new(RwLock::new(HashMap::new()));
     // THE AREA'S CURRENT DR
     pub static ref DR_MAP : Arc<RwLock<HashMap<net::Ipv4Addr,net::Ipv4Addr>>> = Arc::new(RwLock::new(HashMap::new()));
     // THE AREA'S CURRENT BDR
@@ -25,7 +24,6 @@ pub struct AddrRange {
     pub addr: net::Ipv4Addr,
     pub mask: net::Ipv4Addr,
 }
-
 
 pub async fn get_dr(area_id: net::Ipv4Addr) -> net::Ipv4Addr {
     let dr_map = DR_MAP.read().await;
@@ -55,9 +53,11 @@ pub async fn add(area_id: net::Ipv4Addr) {
         })),
     );
     drop(area_map);
-    let mut lsdb_map = LSDB_MAP.write().await;
-    lsdb_map.insert(area_id, Arc::new(RwLock::new(0)));
+
+    let mut lsdb_map = lsdb::LSDB_MAP.write().await;
+    lsdb_map.insert(area_id, Arc::new(RwLock::new(lsdb::LsaDb::empty())));
     drop(lsdb_map);
+
     let mut dr_map = DR_MAP.write().await;
     dr_map.insert(area_id, net::Ipv4Addr::new(0, 0, 0, 0));
     drop(dr_map);

@@ -103,6 +103,7 @@ impl Event {
             //TODO start to exchange the database description packets,first fill
             // the neighbor's three lists, beware the virtuallink and other network type
             abort_inactive_timer(iaddr, naddr).await;
+            
         } else {
             crate::util::error("negotiation_done: invalid status,ignored.");
         }
@@ -114,8 +115,9 @@ impl Event {
             if super::is_lsr_list_empty(iaddr, naddr).await {
                 super::set_status(iaddr, naddr, super::status::Status::Full).await;
             } else {
-                super::set_status(iaddr, naddr, super::status::Status::Loading).await;
                 //TODO send the lsr packet to the neighbor
+                super::set_status(iaddr, naddr, super::status::Status::Loading).await;
+                
             }
         } else {
             crate::util::error("exchange_done: invalid status,ignored.");

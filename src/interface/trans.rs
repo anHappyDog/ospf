@@ -5,8 +5,7 @@ use tokio::sync::{broadcast, RwLock};
 pub const INNER_BUFFER_LENGTH: usize = 128;
 
 pub struct Transmission {
-    pub inner_tcp_tx: broadcast::Sender<bytes::Bytes>,
-    pub inner_udp_tx: broadcast::Sender<bytes::Bytes>,
+    pub inner_packet_tx: broadcast::Sender<bytes::Bytes>,
     pub inner_dd_tx: broadcast::Sender<bytes::Bytes>,
     pub inner_lsr_tx: broadcast::Sender<bytes::Bytes>,
     pub inner_lsu_tx: broadcast::Sender<bytes::Bytes>,
@@ -21,8 +20,7 @@ pub async fn add(addr: net::Ipv4Addr) {
     transmissions.insert(
         addr,
         Transmission {
-            inner_tcp_tx: broadcast::channel(INNER_BUFFER_LENGTH).0,
-            inner_udp_tx: broadcast::channel(INNER_BUFFER_LENGTH).0,
+            inner_packet_tx: broadcast::channel(INNER_BUFFER_LENGTH).0,
             inner_dd_tx: broadcast::channel(INNER_BUFFER_LENGTH).0,
             inner_lsr_tx: broadcast::channel(INNER_BUFFER_LENGTH).0,
             inner_lsu_tx: broadcast::channel(INNER_BUFFER_LENGTH).0,

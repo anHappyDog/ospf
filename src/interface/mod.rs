@@ -3,10 +3,17 @@ pub mod handle;
 pub mod status;
 pub mod trans;
 
-use core::net;
+use std::net;
+
 use std::{collections::HashMap, net::Ipv4Addr, sync::Arc};
 
-use pnet::{datalink, packet::ip};
+use pnet::datalink::Channel::Ethernet;
+use pnet::datalink::EtherType;
+use pnet::packet::ethernet::EtherTypes;
+use pnet::{
+    datalink::{self, Config},
+    packet::ip,
+};
 use tokio::sync::RwLock;
 
 use crate::{area, neighbor, ROUTER_ID};
@@ -14,6 +21,7 @@ use crate::{area, neighbor, ROUTER_ID};
 lazy_static::lazy_static! {
     pub static ref INTERFACE_STATUS_MAP: Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<status::Status>>>>> = Arc::new(RwLock::new(HashMap::new()));
     pub static ref INTERFACE_MAP: Arc<RwLock<HashMap<net::Ipv4Addr,Interface>>> = Arc::new(RwLock::new(HashMap::new()));
+    pub static ref RAW_INTERFACE_MAP : Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<datalink::NetworkInterface>>>>> = Arc::new(RwLock::new(HashMap::new()));
     pub static ref NAME_MAP : Arc<RwLock<HashMap<String,net::Ipv4Addr>>> = Arc::new(RwLock::new(HashMap::new()));
 }
 
@@ -205,19 +213,27 @@ async fn init_interfaces(interfaces: Vec<datalink::NetworkInterface>) {
     }
 }
 
+async fn get_raw_interface(iaddr: net::Ipv4Addr) -> Arc<RwLock<datalink::NetworkInterface>> {
+    let raw_interface_map = RAW_INTERFACE_MAP.read().await;
+    let raw_interface = raw_interface_map.get(&iaddr).unwrap();
+    raw_interface.clone()
+}
+
 pub async fn init() -> Result<(), Box<dyn std::error::Error>> {
     crate::util::log(&format!("Router id is set to: {}", ROUTER_ID.clone()));
     let interfaces = pnet::datalink::interfaces();
     let mut ipv4_addrs: Vec<net::Ipv4Addr> = Vec::new();
+    let mut raw_int_map = RAW_INTERFACE_MAP.write().await;
     for interface in &interfaces {
         let ip_mask = try_get_ip_mask(interface);
         if let None = ip_mask {
             continue;
         }
         let (ip, _) = ip_mask.unwrap();
+        raw_int_map.insert(ip, Arc::new(RwLock::new(interface.clone())));
         ipv4_addrs.push(ip);
     }
-
+    drop(raw_int_map);
     tokio::try_join!(
         tokio::spawn(init_interfaces(interfaces.clone())),
         tokio::spawn(handle::init(ipv4_addrs.clone())),
@@ -254,18 +270,17 @@ pub async fn set_status(iaddr: net::Ipv4Addr, status: status::Status) {
     *locked_status = status;
 }
 
-pub async fn set_area_id(iaddr: net::Ipv4Addr,area_id : net::Ipv4Addr) {
+pub async fn set_area_id(iaddr: net::Ipv4Addr, area_id: net::Ipv4Addr) {
     let mut interface_map = INTERFACE_MAP.write().await;
     let interface = interface_map.get_mut(&iaddr).unwrap();
     interface.area_id = area_id;
 }
 
-pub async fn set_area_id_by_name(iname : String,area_id : net::Ipv4Addr) {
+pub async fn set_area_id_by_name(iname: String, area_id: net::Ipv4Addr) {
     let name_map = NAME_MAP.read().await;
     let iaddr = name_map.get(&iname).unwrap();
-    set_area_id(*iaddr,area_id).await;
+    set_area_id(*iaddr, area_id).await;
 }
-
 
 pub async fn send_neighbor_killnbr(iaddr: net::Ipv4Addr) {
     let neighbors_map = neighbor::INT_NEIGHBORS_MAP.read().await;
