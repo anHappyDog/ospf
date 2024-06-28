@@ -115,7 +115,7 @@ impl Event {
             if super::is_lsr_list_empty(iaddr, naddr).await {
                 super::set_status(iaddr, naddr, super::status::Status::Full).await;
             } else {
-                //TODO send the lsr packet to the neighbor
+                tokio::spawn(interface::handle::send_lsr(iaddr,naddr));
                 super::set_status(iaddr, naddr, super::status::Status::Loading).await;
                 
             }

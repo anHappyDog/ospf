@@ -14,7 +14,7 @@ pub mod status;
 lazy_static::lazy_static! {
     pub static ref NEIGHBOR_STATUS_MAP : Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<status::Status>>>>>>>> = Arc::new(RwLock::new(HashMap::new()));
     pub static ref NEIHGBOR_LSA_RETRANS_LIST_MAP : Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<Vec<crate::lsa::Lsa>>>>>>>>> = Arc::new(RwLock::new(HashMap::new()));
-    pub static ref NEIGHBOR_SUMMARY_LIST_MAP : Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<Vec<crate::lsa::summary::SummaryLSA>>>>>>>>> = Arc::new(RwLock::new(HashMap::new()));
+    pub static ref NEIGHBOR_SUMMARY_LIST_MAP : Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<Vec<crate::lsa::Header>>>>>>>>> = Arc::new(RwLock::new(HashMap::new()));
     pub static ref NEIGHBOR_LSR_LIST_MAP : Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<Vec<crate::packet::lsr::Lsr>>>>>>>>> = Arc::new(RwLock::new(HashMap::new()));
     pub static ref NEIGHBOR_LAST_DD_MAP : Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<HashMap<net::Ipv4Addr,crate::packet::dd::DD>>>>>> = Arc::new(RwLock::new(HashMap::new()));
     pub static ref INT_NEIGHBORS_MAP : Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<Neighbor>>>>>>>> = Arc::new(RwLock::new(HashMap::new()));

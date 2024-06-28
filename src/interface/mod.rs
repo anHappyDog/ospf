@@ -23,6 +23,7 @@ lazy_static::lazy_static! {
     pub static ref INTERFACE_MAP: Arc<RwLock<HashMap<net::Ipv4Addr,Interface>>> = Arc::new(RwLock::new(HashMap::new()));
     pub static ref RAW_INTERFACE_MAP : Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<datalink::NetworkInterface>>>>> = Arc::new(RwLock::new(HashMap::new()));
     pub static ref NAME_MAP : Arc<RwLock<HashMap<String,net::Ipv4Addr>>> = Arc::new(RwLock::new(HashMap::new()));
+
 }
 
 pub const DEFAULT_HELLO_INTERVAL: u16 = 10;

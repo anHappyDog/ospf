@@ -49,6 +49,7 @@ impl DD {
         dd_options: u8,
         dd_flags: u8,
         seqno: u32,
+        headers: Option<Vec<lsa::Header>>,
     ) -> Self {
         let mut packet = Self::empty();
         let interfaces_map = interface::INTERFACE_MAP.read().await;
@@ -73,8 +74,10 @@ impl DD {
         packet.options = dd_options;
         packet.flags = dd_flags;
         packet.dd_sequence_number = seqno;
-        // TODO fill the lsa_headers,but remember can not exceed the mtu
-        
+        // just assume this will never exceed the mtu
+        if let Some(headers) = headers {
+            packet.lsa_headers.extend(headers);
+        }
         packet.header.packet_length = packet.length() as u16;
         packet.header.checksum = ospf_packet_checksum(&packet.to_be_bytes());
         packet
@@ -242,12 +245,18 @@ impl DD {
                     }
                     let ddseqno = neighbor::get_ddseqno(iaddr, naddr).await;
                     let master = neighbor::is_master(iaddr, naddr).await;
-                    if (packet.is_flag_ms_set()  && !master) || (!packet.is_flag_ms_set() && master) {
+                    if (packet.is_flag_ms_set() && !master) || (!packet.is_flag_ms_set() && master)
+                    {
                         crate::util::error(&format!(
                             "Received DD packet from neighbor {} in Exchange state,but does not meet the two situations,ignored.",
                             naddr
                         ));
-                        neighbor::event::send(iaddr, naddr, neighbor::event::Event::SeqNumberMismatch).await;
+                        neighbor::event::send(
+                            iaddr,
+                            naddr,
+                            neighbor::event::Event::SeqNumberMismatch,
+                        )
+                        .await;
                         return;
                     }
                     if packet.is_flag_i_set() {
@@ -255,8 +264,13 @@ impl DD {
                             "Received DD packet from neighbor {} in Exchange state,ignored.",
                             naddr
                         ));
-                        neighbor::event::send(iaddr, naddr, neighbor::event::Event::SeqNumberMismatch).await;
-                        return ;
+                        neighbor::event::send(
+                            iaddr,
+                            naddr,
+                            neighbor::event::Event::SeqNumberMismatch,
+                        )
+                        .await;
+                        return;
                     }
                     let prev_options = neighbor::get_options(iaddr, naddr).await;
                     if packet.options != prev_options {
@@ -264,16 +278,28 @@ impl DD {
                             "Received DD packet from neighbor {} in Exchange state,but options wrong,discarded.",
                             naddr
                         ));
-                        neighbor::event::send(iaddr, naddr, neighbor::event::Event::SeqNumberMismatch).await;
-                        return ;
+                        neighbor::event::send(
+                            iaddr,
+                            naddr,
+                            neighbor::event::Event::SeqNumberMismatch,
+                        )
+                        .await;
+                        return;
                     }
-                    if (master && packet.dd_sequence_number != ddseqno) || (!master && packet.dd_sequence_number + 1 != ddseqno) {
+                    if (master && packet.dd_sequence_number != ddseqno)
+                        || (!master && packet.dd_sequence_number + 1 != ddseqno)
+                    {
                         crate::util::error(&format!(
                             "Received DD packet from neighbor {} in Exchange state,but ddseq is wrong,discarded.",
                             naddr
                         ));
-                        neighbor::event::send(iaddr, naddr, neighbor::event::Event::SeqNumberMismatch).await;
-                        return ;
+                        neighbor::event::send(
+                            iaddr,
+                            naddr,
+                            neighbor::event::Event::SeqNumberMismatch,
+                        )
+                        .await;
+                        return;
                     }
                     // just receive the dd_packet
                     neighbor::set_ddseqno(iaddr, naddr, packet.dd_sequence_number + 1).await;

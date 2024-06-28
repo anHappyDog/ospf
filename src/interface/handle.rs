@@ -1,6 +1,9 @@
 use pnet::datalink::Channel::Ethernet;
 use pnet::datalink::{DataLinkReceiver, DataLinkSender};
-use pnet::packet::ethernet::EtherTypes;
+use pnet::packet::ethernet::{EtherType, EtherTypes, MutableEthernetPacket};
+use pnet::packet::ip::{IpNextHeaderProtocol, IpNextHeaderProtocols};
+use pnet::packet::ipv4::Ipv4Packet;
+use pnet::util::MacAddr;
 use pnet::{
     datalink::{self, Config},
     packet::{
@@ -14,7 +17,9 @@ use pnet::{
     transport,
 };
 use socket2::{Domain, Protocol, Type};
+use std::str::FromStr;
 use std::{collections::HashMap, net, sync::Arc};
+use tokio::task::JoinHandle;
 use tokio::{
     sync::{broadcast, RwLock},
     time,
@@ -32,6 +37,13 @@ use super::status;
 // KEY IS THE INTERFACE 'S IPV4 ADDR
 lazy_static::lazy_static! {
     pub static ref HANDLE_MAP : Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<Handle>>>>> = Arc::new(RwLock::new(HashMap::new()));
+    pub static ref PACKET_SEND : Arc<RwLock<Option<JoinHandle<()>>>> = Arc::new(RwLock::new(None));
+}
+
+pub async fn send_lsr(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr) {
+    let g_lsr_list = neighbor::NEIGHBOR_LSR_LIST_MAP.read().await;
+    let int_lsr_list = g_lsr_list.get(&iaddr).unwrap();
+    let locked_int_lsr_list = int_lsr_list.read().await;
 }
 
 pub struct Handle {
@@ -82,17 +94,9 @@ impl Handle {
         let network_type = interface.network_type;
         let router_dead_interval = interface.router_dead_interval;
         drop(interface_map);
-        let g_trans = super::trans::TRANSMISSIONS.read().await;
-        let trans = g_trans.get(&iaddr).unwrap();
-        self.send_packet = Some(tokio::spawn(send_packet(
-            packet_tx,
-            trans.inner_packet_tx.subscribe(),
-        )));
         self.recv_packet = Some(tokio::spawn(recv_packet(packet_rx, iaddr)));
-
         self.hello_timer = Some(tokio::spawn(hello_timer(
             iaddr,
-            trans.inner_packet_tx.clone(),
             hello_interval,
         )));
         match network_type {
@@ -138,6 +142,39 @@ impl Handle {
     }
 }
 
+pub async fn global_packet_send() {
+    let (mut packet_tx, _) = transport::transport_channel(
+        1024,
+        transport::TransportChannelType::Layer3(IpNextHeaderProtocols::Ipv4),
+    )
+    .expect("create packet sender failed.");
+    let mut packet_inner_rx = super::trans::PACKET_SENDER.clone().subscribe();
+    loop {
+        match packet_inner_rx.recv().await {
+            Ok(bytes) => match Ipv4Packet::new(&bytes) {
+                Some(packet) => {
+                    let destination = packet.get_destination();
+                    match packet_tx.send_to(packet, destination.into()) {
+                        Ok(_) => {
+                            crate::util::debug("send ip packet success.");
+                        }
+                        _ => {
+                            crate::util::debug("send ip packet failed.");
+                        }
+                    }
+                }
+                None => {
+                    crate::util::error("received non-ip inner packet.");
+                }
+            },
+            Err(e) => {
+                crate::util::error(&format!("receive inner packet failed,{}", e));
+                continue;
+            }
+        }
+    }
+}
+
 pub async fn wait_timer(iaddr: net::Ipv4Addr, router_dead_interval: u32) {
     let interval = tokio::time::Duration::from_secs(router_dead_interval as u64);
     tokio::time::sleep(interval).await;
@@ -167,6 +204,8 @@ pub async fn add(addr: net::Ipv4Addr, handle: Handle) {
 }
 
 pub async fn init(addrs: Vec<net::Ipv4Addr>) {
+    let mut g_packet_send = PACKET_SEND.write().await;
+    *g_packet_send = Some(tokio::spawn(global_packet_send()));
     for addr in addrs {
         let handle = Handle::new(addr);
         add(addr, handle).await;
@@ -215,9 +254,9 @@ pub async fn recv_packet(mut packet_rx: Box<dyn DataLinkReceiver>, iaddr: net::I
                         }
                     }
                     _ => {
-                        crate::util::debug(
-                            "received non-ospf udp packet,forwarding or just received.",
-                        );
+                        // crate::util::debug(
+                        //     "received non-ospf ip packet,forwarding or just received.",
+                        // );
                         continue;
                     }
                 }
@@ -229,55 +268,14 @@ pub async fn recv_packet(mut packet_rx: Box<dyn DataLinkReceiver>, iaddr: net::I
     }
 }
 
-/// # send_packet
-/// the function is used to create the future handle for send udp ipv4 packet
-/// - packet_tx : the sender for the udp handler
-/// - udp_inner_rx : the receiver for inner interface or other interfaces, to forward the ipv4 packet
-pub async fn send_packet(
-    mut packet_tx: Box<dyn DataLinkSender>,
-    mut inner_packet_rx: broadcast::Receiver<bytes::Bytes>,
-) -> () {
-    let socket = socket2::Socket::new(Domain::IPV4,Type::RAW,Some(Protocol::UDP)).unwrap();
-    
-    loop {
-        match inner_packet_rx.recv().await {
-            Ok(packet) => match packet_tx.send_to(&packet, None) {
-                Some(result) => match result {
-                    Ok(_) => {
-                        let ip_packet = match ipv4::Ipv4Packet::new(&packet) {
-                            Some(ip_packet) => ip_packet,
-                            None => {
-                                crate::util::error("receive the inner packet failed.");
-                                continue;
-                            }
-                        };
-                        crate::util::debug(&format!("packet source is {},destionation is {}",ip_packet.get_source(),ip_packet.get_destination()));    
-                        crate::util::debug(&format!("packet is {:?}",ip_packet));
-                        crate::util::debug("send packet success.");
-                    }
-                    Err(e) => {
-                        crate::util::error(&format!("send packet failed:{}", e));
-                    }
-                },
-                None => {
-                    crate::util::error("send packet failed.");
-                }
-            },
-            Err(_) => {
-                crate::util::error("receive the inner packet failed.");
-                continue;
-            }
-        }
-    }
-}
 
 pub async fn hello_timer(
     iaddr: net::Ipv4Addr,
-    udp_inner_tx: broadcast::Sender<bytes::Bytes>,
     hello_interval: u16,
 ) -> () {
     crate::util::debug("hello timer started.");
-    let mut buffer: Vec<u8> = vec![0; IPV4_PACKET_MTU];
+    let mut inner_packet_tx = super::trans::PACKET_SENDER.clone(); 
+    let mut buffer: Vec<u8> = vec![0; IPV4_PACKET_MTU - 100];
     let interval = time::Duration::from_secs(hello_interval as u64);
     loop {
         tokio::time::sleep(interval).await;
@@ -293,7 +291,7 @@ pub async fn hello_timer(
             }
         };
         loop {
-            match udp_inner_tx.send(bytes::Bytes::from(hello_ipv4_packet.packet().to_vec())) {
+            match inner_packet_tx.send(bytes::Bytes::from(hello_ipv4_packet.packet().to_vec())) {
                 Ok(_) => {
                     crate::util::debug("send hello packet success.");
                     break;
@@ -313,17 +311,16 @@ pub async fn start_dd_negoation(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr) {
     let g_trans = super::trans::TRANSMISSIONS.read().await;
     let trans = g_trans.get(&iaddr).unwrap();
     int_handle.dd_negoation = Some(tokio::spawn(dd_negoation(
-        trans.inner_packet_tx.clone(),
         iaddr,
         naddr,
     )));
 }
 
 pub async fn dd_negoation(
-    udp_inner_tx: broadcast::Sender<bytes::Bytes>,
     iaddr: net::Ipv4Addr,
     naddr: net::Ipv4Addr,
 ) {
+    let inner_packet_tx = super::trans::PACKET_SENDER.clone();
     let interface_map = super::INTERFACE_MAP.read().await;
     let interface = interface_map.get(&iaddr).unwrap();
     let rxmt_interval = interface.rxmt_interval;
@@ -334,7 +331,7 @@ pub async fn dd_negoation(
 
     loop {
         tokio::time::sleep(duration).await;
-        let dd_packet = DD::new(iaddr, naddr, dd_options, dd_flags, ddseq).await;
+        let dd_packet = DD::new(iaddr, naddr, dd_options, dd_flags, ddseq,None).await;
         let mut buffer: Vec<u8> = vec![0; IPV4_PACKET_MTU];
         let ip_packet = match dd_packet.build_ipv4_packet(&mut buffer, iaddr, naddr) {
             Some(ip_packet) => ip_packet,
@@ -343,7 +340,7 @@ pub async fn dd_negoation(
                 continue;
             }
         };
-        match udp_inner_tx.send(bytes::Bytes::from(ip_packet.packet().to_vec())) {
+        match inner_packet_tx.send(bytes::Bytes::from(ip_packet.packet().to_vec())) {
             Ok(_) => {
                 crate::util::debug("send dd packet success.");
             }
