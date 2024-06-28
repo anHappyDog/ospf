@@ -37,9 +37,9 @@ pub async fn changed(naddr: net::Ipv4Addr, iaddr: net::Ipv4Addr) {
                     crate::util::debug(&format!("TwoWayReceived: {}", naddr));
                     super::event::Event::two_way_received(naddr, iaddr).await;
                 }
-                super::event::Event::NegotiationDone => {
+                super::event::Event::NegotiationDone(n_master) => {
                     crate::util::debug(&format!("NegotiationDone: {}", naddr));
-                    super::event::Event::negotiation_done(naddr, iaddr).await;
+                    super::event::Event::negotiation_done(naddr, iaddr,n_master).await;
                 }
                 super::event::Event::ExchangeDone => {
                     crate::util::debug(&format!("ExchangeDone: {}", naddr));

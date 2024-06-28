@@ -23,6 +23,10 @@ lazy_static::lazy_static! {
     pub static ref INTERFACE_MAP: Arc<RwLock<HashMap<net::Ipv4Addr,Interface>>> = Arc::new(RwLock::new(HashMap::new()));
     pub static ref RAW_INTERFACE_MAP : Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<datalink::NetworkInterface>>>>> = Arc::new(RwLock::new(HashMap::new()));
     pub static ref NAME_MAP : Arc<RwLock<HashMap<String,net::Ipv4Addr>>> = Arc::new(RwLock::new(HashMap::new()));
+// THE NETWORK'S CURRENT DR
+pub static ref DR_MAP : Arc<RwLock<HashMap<net::Ipv4Addr,net::Ipv4Addr>>> = Arc::new(RwLock::new(HashMap::new()));
+// THE NETWORK'S CURRENT BDR
+pub static ref BDR_MAP : Arc<RwLock<HashMap<net::Ipv4Addr,net::Ipv4Addr>>> = Arc::new(RwLock::new(HashMap::new()));
 
 }
 
@@ -76,6 +80,25 @@ pub struct Interface {
     pub router_priority: u8,
 }
 
+pub async fn get_dr(iaddr: net::Ipv4Addr) -> net::Ipv4Addr {
+    let dr_map = DR_MAP.read().await;
+    *dr_map.get(&iaddr).unwrap()
+}
+
+pub async fn get_bdr(iaddr: net::Ipv4Addr) -> net::Ipv4Addr {
+    let bdr_map = BDR_MAP.read().await;
+    *bdr_map.get(&iaddr).unwrap()
+}
+
+pub async fn is_abr() -> bool {
+    false
+}
+
+pub async fn get_network_type(iaddr: net::Ipv4Addr) -> NetworkType {
+    let imap = INTERFACE_MAP.read().await;
+    imap.get(&iaddr).unwrap().network_type
+}
+
 fn try_get_ip_mask(
     interface: &datalink::NetworkInterface,
 ) -> Option<(net::Ipv4Addr, net::Ipv4Addr)> {
@@ -88,6 +111,12 @@ fn try_get_ip_mask(
             let mask = ip.mask().to_string().parse::<net::Ipv4Addr>().unwrap();
             (iaddr, mask)
         })
+}
+
+pub async fn get_rxmt_interval(iaddr: net::Ipv4Addr) -> u32 {
+    let interface_map = INTERFACE_MAP.read().await;
+    let interface = interface_map.get(&iaddr).unwrap();
+    interface.rxmt_interval
 }
 
 pub async fn add(interface: &datalink::NetworkInterface) {
@@ -257,6 +286,11 @@ pub async fn get_area_id(iaddr: net::Ipv4Addr) -> net::Ipv4Addr {
     interface.area_id
 }
 
+pub async fn get_inf_trans_delay(iaddr: net::Ipv4Addr) -> u32 {
+    let interface_map = INTERFACE_MAP.read().await;
+    let interface = interface_map.get(&iaddr).unwrap();
+    interface.inf_trans_delay
+}
 pub async fn get_status(iaddr: net::Ipv4Addr) -> status::Status {
     let status_map = INTERFACE_STATUS_MAP.read().await;
     let status = status_map.get(&iaddr).unwrap();

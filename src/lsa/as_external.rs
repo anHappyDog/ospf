@@ -1,3 +1,5 @@
+use crate::area::lsdb;
+
 use super::Header;
 
 #[derive(Clone)]
@@ -55,6 +57,13 @@ impl TosDes {
 }
 
 impl ASExternalLSA {
+    pub fn build_identifier(&self) -> lsdb::LsaIdentifer {
+        lsdb::LsaIdentifer {
+            lsa_type: self.header.lsa_type as u32,
+            link_state_id: self.header.link_state_id,
+            advertising_router: self.header.advertising_router,
+        }
+    }
     pub fn try_from_be_bytes(payload: &[u8]) -> Option<Self> {
         if payload.len() < Header::length() + 13 {
             return None;

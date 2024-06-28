@@ -2,7 +2,11 @@ use std::{collections::HashMap, net, sync::Arc};
 
 use tokio::sync::RwLock;
 
-use crate::{interface, packet::hello::Hello};
+use crate::{
+    area::{self, lsdb::LsaIdentifer},
+    interface,
+    packet::{dd::DD, hello::Hello},
+};
 
 pub mod event;
 pub mod handle;
@@ -13,9 +17,9 @@ pub mod status;
 /// can get the id by the ospf packet 's inner function `get_neighbor_addr`
 lazy_static::lazy_static! {
     pub static ref NEIGHBOR_STATUS_MAP : Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<status::Status>>>>>>>> = Arc::new(RwLock::new(HashMap::new()));
-    pub static ref NEIHGBOR_LSA_RETRANS_LIST_MAP : Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<Vec<crate::lsa::Lsa>>>>>>>>> = Arc::new(RwLock::new(HashMap::new()));
-    pub static ref NEIGHBOR_SUMMARY_LIST_MAP : Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<Vec<crate::lsa::Header>>>>>>>>> = Arc::new(RwLock::new(HashMap::new()));
-    pub static ref NEIGHBOR_LSR_LIST_MAP : Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<Vec<crate::packet::lsr::Lsr>>>>>>>>> = Arc::new(RwLock::new(HashMap::new()));
+    pub static ref NEIHGBOR_LSA_RETRANS_LIST_MAP : Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<Vec<area::lsdb::LsaIdentifer>>>>>>>>> = Arc::new(RwLock::new(HashMap::new()));
+    pub static ref NEIGHBOR_SUMMARY_LIST_MAP : Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<Vec<area::lsdb::LsaIdentifer>>>>>>>>> = Arc::new(RwLock::new(HashMap::new()));
+    pub static ref NEIGHBOR_LSR_LIST_MAP : Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<Vec<area::lsdb::LsaIdentifer>>>>>>>>> = Arc::new(RwLock::new(HashMap::new()));
     pub static ref NEIGHBOR_LAST_DD_MAP : Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<HashMap<net::Ipv4Addr,crate::packet::dd::DD>>>>>> = Arc::new(RwLock::new(HashMap::new()));
     pub static ref INT_NEIGHBORS_MAP : Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<Neighbor>>>>>>>> = Arc::new(RwLock::new(HashMap::new()));
 }
@@ -165,6 +169,69 @@ pub async fn save_last_dd(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr, dd: crate:
     locked_last_dd.insert(naddr, dd);
 }
 
+pub async fn update_lsr_list(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr, dd: DD) {
+    let lsr_list = NEIGHBOR_LSR_LIST_MAP.read().await;
+    let lsr = lsr_list.get(&iaddr).unwrap();
+    let locked_lsr = lsr.read().await;
+    let lsr_list = locked_lsr.get(&naddr).unwrap();
+    let mut locked_lsr_list = lsr_list.write().await;
+    let area_id = interface::get_area_id(iaddr).await;
+    let lsdb = area::lsdb::get_lsdb(area_id).await;
+    let locked_lsdb = lsdb.read().await;
+
+    for lsa_header in dd.lsa_headers.iter() {
+        let identifier = LsaIdentifer {
+            lsa_type: lsa_header.lsa_type as u32,
+            link_state_id: lsa_header.link_state_id,
+            advertising_router: lsa_header.advertising_router,
+        };
+        if !locked_lsdb.contains_lsa(identifier).await {
+            locked_lsr_list.push(identifier);
+        }
+    }
+}
+
+
+// when a lsa header is in a lsack packet, then use this to 
+/// remove the lsa identifier from the neighbor's retrans list.
+pub async fn ack_lsa(
+    iaddr: net::Ipv4Addr,
+    naddr: net::Ipv4Addr,
+    lsa_identifer: area::lsdb::LsaIdentifer,
+) {
+    let g_retrans_list = NEIHGBOR_LSA_RETRANS_LIST_MAP.read().await;
+    let retrans_list = g_retrans_list.get(&iaddr).unwrap();
+    let locked_retrans_list = retrans_list.read().await;
+    let n_retrans_list = locked_retrans_list.get(&naddr).unwrap();
+    let mut locked_n_retrans_list = n_retrans_list.write().await;
+    locked_n_retrans_list.retain(|x| x != &lsa_identifer);
+}
+
+
+pub async fn get_trans_list(
+    iaddr: net::Ipv4Addr,
+    naddr: net::Ipv4Addr,
+) -> Arc<RwLock<Vec<area::lsdb::LsaIdentifer>>> {
+    let g_lsa_retrans_list = NEIHGBOR_LSA_RETRANS_LIST_MAP.read().await;
+    let lsa_retrans_list = g_lsa_retrans_list.get(&iaddr).unwrap();
+    let locked_lsa_retrans_list = lsa_retrans_list.read().await;
+    let n_lsa_retrans_list = locked_lsa_retrans_list.get(&naddr).unwrap();
+    n_lsa_retrans_list.clone()
+}
+
+pub async fn fill_retrans_list(
+    iaddr: net::Ipv4Addr,
+    naddr: net::Ipv4Addr,
+    lsa_identifers: Vec<area::lsdb::LsaIdentifer>,
+) {
+    let g_lsa_retrans_list = NEIHGBOR_LSA_RETRANS_LIST_MAP.read().await;
+    let lsa_retrans_list = g_lsa_retrans_list.get(&iaddr).unwrap();
+    let locked_lsa_retrans_list = lsa_retrans_list.read().await;
+    let n_lsa_retrans_list = locked_lsa_retrans_list.get(&naddr).unwrap();
+    let mut locked_n_lsa_retrans_list = n_lsa_retrans_list.write().await;
+    locked_n_lsa_retrans_list.extend(lsa_identifers);
+}
+
 pub async fn is_lsr_list_empty(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr) -> bool {
     let lsr_list = NEIGHBOR_LSR_LIST_MAP.read().await;
     let lsr = lsr_list.get(&iaddr).unwrap();
@@ -288,7 +355,6 @@ pub async fn add(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr, neighbor: Neighbor)
 }
 
 pub async fn is_adjacent(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr) -> bool {
-    
     false
 }
 

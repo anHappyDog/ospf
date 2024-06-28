@@ -5,7 +5,7 @@ use tokio::{
     sync::{broadcast, RwLock},
 };
 
-use super::handle;
+use super::handle::{self, start_dd_send};
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub enum Event {
     InterfaceUp,
@@ -62,7 +62,7 @@ impl Event {
         }
         let new_status = select_dr_bdr(iaddr).await;
         super::set_status(iaddr, new_status).await;
-        handle::start_dd_negoation(iaddr, naddr).await;
+        start_dd_send(iaddr, naddr, true, None).await;
     }
     pub async fn loop_ind(iaddr: net::Ipv4Addr) {
         let g_handlers = super::handle::HANDLE_MAP.read().await;

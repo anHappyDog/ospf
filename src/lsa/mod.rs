@@ -8,6 +8,8 @@ use router::ROUTER_LSA_TYPE;
 use summary::{SUMMARY_LSA_TYPE_3, SUMMARY_LSA_TYPE_4};
 use tokio::sync::RwLock;
 
+use crate::area::lsdb;
+
 pub mod as_external;
 pub mod network;
 pub mod router;
@@ -86,7 +88,7 @@ impl Header {
     }
 }
 
-
+#[derive(Clone)]
 pub enum Lsa {
     Router(router::RouterLSA),
     Network(network::NetworkLSA),
@@ -95,6 +97,22 @@ pub enum Lsa {
 }
 
 impl Lsa {
+    pub fn copy_header(&self) -> Header {
+        match self {
+            Lsa::Router(lsa) => lsa.header,
+            Lsa::Network(lsa) => lsa.header,
+            Lsa::Summary(lsa) => lsa.header,
+            Lsa::ASExternal(lsa) => lsa.header,
+        }
+    }
+    pub fn build_identifier(&self) -> lsdb::LsaIdentifer {
+        match self {
+            Lsa::Router(lsa) => lsa.build_identifier(),
+            Lsa::Network(lsa) => lsa.build_identifier(),
+            Lsa::Summary(lsa) => lsa.build_identifier(),
+            Lsa::ASExternal(lsa) => lsa.build_identifier(),
+        }
+    }
     pub fn try_from_be_bytes(bytes: &[u8]) -> Option<Self> {
         if bytes.len() < Header::length() {
             return None;
@@ -127,4 +145,27 @@ impl Lsa {
             Lsa::ASExternal(lsa) => lsa.length(),
         }
     }
+}
+
+pub fn calculate_fletcher16(data: &[u8]) -> u16 {
+    let mut sum1: u16 = 0;
+    let mut sum2: u16 = 0;
+
+    for &byte in data {
+        sum1 = (sum1 + byte as u16) % 255;
+        sum2 = (sum2 + sum1) % 255;
+    }
+
+    (sum2 << 8) | sum1
+}
+
+pub fn calculate_lsa_checksum(lsa: &mut [u8]) -> u16 {
+    let checksum_offset = 16;
+
+    lsa[checksum_offset] = 0;
+    lsa[checksum_offset + 1] = 0;
+
+    let checksum = calculate_fletcher16(lsa);
+
+    checksum
 }

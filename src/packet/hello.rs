@@ -59,16 +59,8 @@ impl Hello {
         packet.router_priority = interface.router_priority;
         packet.router_dead_interval = interface.router_dead_interval;
 
-        packet.designated_router = {
-            let area_drs = crate::area::DR_MAP.read().await;
-            let dr = area_drs.get(&interface.area_id).unwrap().clone();
-            dr.into()
-        };
-        packet.backup_designated_router = {
-            let area_bdrs = crate::area::BDR_MAP.read().await;
-            let bdr = area_bdrs.get(&interface.area_id).unwrap().clone();
-            bdr.into()
-        };
+        packet.designated_router = interface::get_dr(iaddr).await.into();
+        packet.backup_designated_router = interface::get_bdr(iaddr).await.into();
         packet.add_neighbors(iaddr).await;
         packet.header.packet_length = packet.length() as u16;
         packet.header.checksum = ospf_packet_checksum(&packet.to_be_bytes());

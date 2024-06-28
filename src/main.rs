@@ -1,7 +1,9 @@
-use std::net;
+use std::{net, sync::Arc};
 
+use lsa::INITIAL_SEQUENCE_NUMBER;
 use packet::{hello::HELLO_TYPE, ospf_packet_checksum};
 use pnet::{packet::ip::IpNextHeaderProtocols, transport::{self, TransportChannelType}};
+use tokio::sync::RwLock;
 
 pub mod area;
 pub mod cli;
@@ -21,6 +23,7 @@ pub const OPTION_DC: u8 = 0x20;
 
 lazy_static::lazy_static! {
     pub static ref ROUTER_ID : net::Ipv4Addr = util::input_router_id();
+    pub static ref CURRENT_SEQNO : Arc<RwLock<u32>> = Arc::new(RwLock::new(INITIAL_SEQUENCE_NUMBER as u32));
 }
 
 pub const ALL_SPF_ROUTERS: net::Ipv4Addr = net::Ipv4Addr::new(224, 0, 0, 5);

@@ -10,7 +10,8 @@ use pnet::{
 };
 
 use crate::{
-    interface::{self, NetworkType},
+    area::{self, lsdb::fetch_lsa_headers},
+    interface::{self, get_area_id, handle::start_dd_send, NetworkType},
     lsa, neighbor, OSPF_IP_PROTOCOL,
 };
 
@@ -214,6 +215,12 @@ impl DD {
                         neighbor::set_option(iaddr, naddr, packet.options).await;
                         neighbor::set_ddseqno(iaddr, naddr, packet.dd_sequence_number).await;
                         neighbor::set_master(iaddr, naddr, true).await;
+                        neighbor::event::send(
+                            iaddr,
+                            naddr,
+                            neighbor::event::Event::NegotiationDone(true),
+                        )
+                        .await;
                     } else if !packet.is_flag_i_set()
                         && !packet.is_flag_m_set()
                         && packet.dd_sequence_number == cur_dd_seq
@@ -221,6 +228,12 @@ impl DD {
                     {
                         neighbor::set_option(iaddr, naddr, packet.options).await;
                         neighbor::set_master(iaddr, naddr, false).await;
+                        neighbor::event::send(
+                            iaddr,
+                            naddr,
+                            neighbor::event::Event::NegotiationDone(false),
+                        )
+                        .await;
                     } else {
                         crate::util::debug(&format!(
                             "Received DD packet from neighbor {} in ExStart state,but does not meet the two situations,ignored.",
@@ -304,6 +317,22 @@ impl DD {
                     // just receive the dd_packet
                     neighbor::set_ddseqno(iaddr, naddr, packet.dd_sequence_number + 1).await;
                     neighbor::save_last_dd(iaddr, naddr, packet.clone()).await;
+                    if !master {
+                        if !packet.is_flag_m_set() {
+                            neighbor::event::send(
+                                iaddr,
+                                naddr,
+                                neighbor::event::Event::ExchangeDone,
+                            )
+                            .await;
+                        } else {
+                            let lsa_headers = fetch_lsa_headers(iaddr).await;
+                            start_dd_send(iaddr, naddr, master, Some(lsa_headers)).await;
+                        }
+                    } else {
+                        neighbor::event::send(iaddr, naddr, neighbor::event::Event::ExchangeDone)
+                            .await;
+                    }
                 }
                 neighbor::status::Status::Loading => {
                     crate::util::error(&format!(

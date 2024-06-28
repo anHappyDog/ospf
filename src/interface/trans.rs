@@ -2,10 +2,12 @@ use std::{collections::HashMap, net, sync::Arc};
 
 use tokio::sync::{broadcast, RwLock};
 
+use crate::packet::dd::DD;
+
 pub const INNER_BUFFER_LENGTH: usize = 128;
 
 pub struct Transmission {
-    pub inner_dd_tx: broadcast::Sender<bytes::Bytes>,
+    pub inner_dd_tx: broadcast::Sender<DD>,
     pub inner_lsr_tx: broadcast::Sender<bytes::Bytes>,
     pub inner_lsu_tx: broadcast::Sender<bytes::Bytes>,
 }

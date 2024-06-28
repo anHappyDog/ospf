@@ -12,6 +12,8 @@ lazy_static::lazy_static! {
 pub struct Handle {
     pub status_machine: Option<tokio::task::JoinHandle<()>>,
     pub inactive_timer: Option<tokio::task::JoinHandle<()>>,
+    pub dd_negoiation: Option<tokio::task::JoinHandle<()>>,
+    pub dd_exchange: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl Handle {
@@ -19,6 +21,8 @@ impl Handle {
         Self {
             status_machine: Some(tokio::spawn(super::status::changed(naddr, iaddr))),
             inactive_timer: None,
+            dd_negoiation: None,
+            dd_exchange: None,
         }
     }
 }
@@ -48,3 +52,5 @@ pub async fn inactive_timer(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr) {
     tokio::time::sleep(std::time::Duration::from_secs(router_dead_interval as u64)).await;
     super::event::send(iaddr, naddr, super::event::Event::InactivityTimer).await;
 }
+
+

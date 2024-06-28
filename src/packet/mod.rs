@@ -180,13 +180,17 @@ impl OspfPacket {
                 tokio::spawn(DD::received(dd_packet, ipv4_packet.get_source(), iaddr));
             }
             OspfPacket::LSR(lsr_packet) => {
-                tokio::spawn(Lsr::received(lsr_packet));
+                tokio::spawn(Lsr::received(lsr_packet, ipv4_packet.get_source(), iaddr));
             }
             OspfPacket::LSU(lsu_packet) => {
-                tokio::spawn(Lsu::received(lsu_packet));
+                tokio::spawn(Lsu::received(lsu_packet, ipv4_packet.get_source(), iaddr));
             }
             OspfPacket::LSACK(lsack_packet) => {
-                tokio::spawn(Lsack::received(lsack_packet));
+                tokio::spawn(Lsack::received(
+                    lsack_packet,
+                    ipv4_packet.get_source(),
+                    iaddr,
+                ));
             }
         }
     }

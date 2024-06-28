@@ -1,3 +1,5 @@
+use crate::area::lsdb;
+
 #[derive(Clone)]
 pub struct SummaryLSA {
     pub header: super::Header,
@@ -10,6 +12,13 @@ pub const SUMMARY_LSA_TYPE_3: u8 = 3;
 pub const SUMMARY_LSA_TYPE_4: u8 = 4;
 
 impl SummaryLSA {
+    pub fn build_identifier(&self) -> lsdb::LsaIdentifer {
+        lsdb::LsaIdentifer {
+            lsa_type: self.header.lsa_type as u32,
+            link_state_id: self.header.link_state_id,
+            advertising_router: self.header.advertising_router,
+        }
+    }
     pub fn tos_type(tos: u32) -> u8 {
         (tos >> 24) as u8
     }

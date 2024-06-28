@@ -2,7 +2,14 @@ use std::{collections::HashMap, net, sync::Arc};
 
 use tokio::sync::{broadcast, RwLock};
 
-use crate::interface::{self, handle::start_dd_negoation};
+use crate::{
+    area,
+    interface::{
+        self, get_area_id,
+        handle::{start_dd_send, start_send_lsr, stop_dd_send},
+    },
+    lsa,
+};
 
 use super::handle::abort_inactive_timer;
 
@@ -11,7 +18,7 @@ pub enum Event {
     HelloReceived,
     Start,
     TwoWayReceived,
-    NegotiationDone,
+    NegotiationDone(bool),
     ExchangeDone,
     BadLSReq,
     LoadingDone,
@@ -29,7 +36,7 @@ impl std::fmt::Debug for Event {
             Event::HelloReceived => write!(f, "HelloReceived"),
             Event::Start => write!(f, "Start"),
             Event::TwoWayReceived => write!(f, "TwoWayReceived"),
-            Event::NegotiationDone => write!(f, "NegotiationDone"),
+            Event::NegotiationDone(_) => write!(f, "NegotiationDone"),
             Event::ExchangeDone => write!(f, "ExchangeDone"),
             Event::BadLSReq => write!(f, "BadLSReq"),
             Event::LoadingDone => write!(f, "LoadingDone"),
@@ -85,7 +92,7 @@ impl Event {
         if super::status::Status::Init == old_status {
             if super::is_adjacent(iaddr, naddr).await {
                 // need to build the adjacency
-                start_dd_negoation(iaddr, naddr).await;
+                start_dd_send(iaddr, naddr, true, None).await;
                 super::set_status(iaddr, naddr, super::status::Status::ExStart).await;
             } else {
                 // do not need to build the adjacency
@@ -97,13 +104,18 @@ impl Event {
             crate::util::error("two_way_received: invalid status,ignored.");
         }
     }
-    pub async fn negotiation_done(naddr: net::Ipv4Addr, iaddr: net::Ipv4Addr) {
+    pub async fn negotiation_done(naddr: net::Ipv4Addr, iaddr: net::Ipv4Addr, n_master: bool) {
         let old_status = super::get_status(iaddr, naddr).await;
         if super::status::Status::ExStart == old_status {
-            //TODO start to exchange the database description packets,first fill
-            // the neighbor's three lists, beware the virtuallink and other network type
             abort_inactive_timer(iaddr, naddr).await;
-            
+            stop_dd_send(iaddr).await;
+            // fill the neighbor's summary list
+            let lsa_headers = area::lsdb::fetch_lsa_headers(iaddr).await;
+            if n_master {
+                start_dd_send(iaddr, naddr, n_master, None).await;
+            } else {
+                start_dd_send(iaddr, naddr, n_master, Some(lsa_headers)).await;
+            }
         } else {
             crate::util::error("negotiation_done: invalid status,ignored.");
         }
@@ -115,9 +127,8 @@ impl Event {
             if super::is_lsr_list_empty(iaddr, naddr).await {
                 super::set_status(iaddr, naddr, super::status::Status::Full).await;
             } else {
-                tokio::spawn(interface::handle::send_lsr(iaddr,naddr));
+                start_send_lsr(iaddr, naddr).await;
                 super::set_status(iaddr, naddr, super::status::Status::Loading).await;
-                
             }
         } else {
             crate::util::error("exchange_done: invalid status,ignored.");
@@ -154,7 +165,7 @@ impl Event {
         if super::status::Status::TwoWay == old_status {
             if super::is_adjacent(iaddr, naddr).await {
                 // start to build the adjacency
-                start_dd_negoation(iaddr, naddr).await;
+                start_dd_send(iaddr, naddr, true, None).await;
                 super::set_status(iaddr, naddr, super::status::Status::ExStart).await;
             } else {
                 crate::util::debug("adj_ok: do not need to build the adjacency,ignored.");
@@ -187,7 +198,7 @@ impl Event {
                 tokio::spawn(super::clear_lsr_list(iaddr.clone(), naddr.clone())),
                 tokio::spawn(super::clear_summary_list(iaddr.clone(), naddr.clone()))
             );
-            interface::handle::start_dd_negoation(iaddr, naddr).await;
+            start_dd_send(iaddr, naddr, true, None).await;
         } else {
             crate::util::error("seq_number_mismatch: invalid status,ignored.");
         }

@@ -5,12 +5,16 @@ use pnet::packet::{
     ipv4::{Ipv4Packet, MutableIpv4Packet},
 };
 
-use crate::{interface::{self, NetworkType}, OSPF_IP_PROTOCOL};
+use crate::{
+    area::lsdb::LsaIdentifer,
+    interface::{self, NetworkType},
+    lsa, neighbor, ALL_SPF_ROUTERS, OSPF_IP_PROTOCOL,
+};
 
 pub const LSACK_TYPE: u8 = 5;
 
 pub struct Lsack {
-    pub header : super::OspfHeader,
+    pub header: super::OspfHeader,
     pub lsa_headers: Vec<crate::lsa::Header>,
 }
 
@@ -32,13 +36,21 @@ impl Lsack {
             lsa_headers: Vec::new(),
         }
     }
-    pub fn get_neighbor_addr(&self, network_type: NetworkType, paddr: net::Ipv4Addr) -> net::Ipv4Addr {
+    pub fn get_neighbor_addr(
+        &self,
+        network_type: NetworkType,
+        paddr: net::Ipv4Addr,
+    ) -> net::Ipv4Addr {
         match network_type {
             NetworkType::Broadcast | NetworkType::NBMA | NetworkType::PointToMultipoint => paddr,
             _ => self.header.router_id,
         }
     }
-    pub fn get_neighbor_id(&self, network_type: NetworkType, paddr: net::Ipv4Addr) -> net::Ipv4Addr {
+    pub fn get_neighbor_id(
+        &self,
+        network_type: NetworkType,
+        paddr: net::Ipv4Addr,
+    ) -> net::Ipv4Addr {
         match network_type {
             NetworkType::Broadcast | NetworkType::NBMA | NetworkType::PointToMultipoint => {
                 self.header.router_id
@@ -58,9 +70,22 @@ impl Lsack {
             lsa_headers.push(lsa_header);
             offset += crate::lsa::Header::length();
         }
-        Some(Lsack { header,lsa_headers })
+        Some(Lsack {
+            header,
+            lsa_headers,
+        })
     }
-    pub async fn received(lsack_packet: Lsack) {}
+    pub async fn received(lsack_packet: Lsack, naddr: net::Ipv4Addr, iaddr: net::Ipv4Addr) {
+        let old_status = neighbor::get_status(iaddr, naddr).await;
+        if old_status < neighbor::status::Status::Exchange {
+            crate::util::error("Received LSACK from neighbor in wrong state,discarded.");
+            return;
+        }
+        for lsa in lsack_packet.lsa_headers.iter() {
+            let lsa_identifer = LsaIdentifer::from_header(lsa);
+            neighbor::ack_lsa(iaddr, naddr, lsa_identifer).await;
+        }
+    }
     pub fn build_ipv4_packet<'a>(
         &'a self,
         buffer: &'a mut Vec<u8>,
@@ -80,19 +105,19 @@ impl Lsack {
         packet.set_source(int_ipv4_addr);
         match network_type {
             interface::NetworkType::Broadcast => {
-                packet.set_destination([224, 0, 0, 5].into());
+                packet.set_destination(ALL_SPF_ROUTERS);
             }
             interface::NetworkType::PointToPoint => {
-                packet.set_destination([224, 0, 0, 5].into());
+                packet.set_destination(destination_addr);
             }
             interface::NetworkType::NBMA => {
-                packet.set_destination([224, 0, 0, 5].into());
+                packet.set_destination(ALL_SPF_ROUTERS);
             }
             interface::NetworkType::PointToMultipoint => {
-                packet.set_destination([224, 0, 0, 5].into());
+                packet.set_destination(ALL_SPF_ROUTERS);
             }
             interface::NetworkType::VirtualLink => {
-                packet.set_destination([224, 0, 0, 5].into());
+                packet.set_destination(destination_addr);
             }
         }
         packet.set_payload(&self.to_be_bytes());

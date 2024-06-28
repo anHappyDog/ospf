@@ -1,3 +1,7 @@
+use core::net;
+
+use crate::{area::lsdb, interface, OPTION_E};
+
 #[derive(Clone)]
 pub struct RouterLSA {
     pub header: super::Header,
@@ -6,7 +10,7 @@ pub struct RouterLSA {
     pub link_states: Vec<LinkState>,
 }
 
-pub const ROUTER_LSA_TYPE : u8 = 1;
+pub const ROUTER_LSA_TYPE: u8 = 1;
 #[derive(Clone)]
 pub struct LinkState {
     pub link_id: u32,
@@ -18,7 +22,6 @@ pub struct LinkState {
 }
 
 impl LinkState {
-
     pub fn to_be_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&self.link_id.to_be_bytes());
@@ -31,7 +34,7 @@ impl LinkState {
         }
         bytes
     }
-    
+
     // the pass tos is host endian
     pub fn tos_type(tos: u32) -> u8 {
         (tos >> 24) as u8
@@ -75,10 +78,46 @@ impl LinkState {
             tos,
         })
     }
-  
 }
 
 impl RouterLSA {
+    pub async fn new(iaddr: net::Ipv4Addr, links: Vec<LinkState>) -> Self {
+        let interface = interface::INTERFACE_MAP.read().await;
+        let locked_interface = interface.get(&iaddr).unwrap();
+        let options = locked_interface.options;
+        drop(interface);
+        let lsa_type = ROUTER_LSA_TYPE;
+        let link_state_id = crate::ROUTER_ID.clone();
+        let advertising_router = crate::ROUTER_ID.clone();
+        let mut seqno = crate::CURRENT_SEQNO.write().await;
+
+        let mut lsa = Self {
+            header: super::Header {
+                age: 0,
+                options,
+                sequence_number: *seqno,
+                lsa_type,
+                link_state_id: link_state_id.into(),
+                advertising_router: advertising_router.into(),
+                checksum: 0,
+                length: 0,
+            },
+            veb: 0,
+            link_count: links.len() as u16,
+            link_states: links,
+        };
+        lsa.header.length = lsa.length() as u16;
+        lsa.header.checksum = super::calculate_lsa_checksum(lsa.to_be_bytes().as_mut_slice());
+        *seqno += 1;
+        lsa
+    }
+    pub fn build_identifier(&self) -> lsdb::LsaIdentifer {
+        lsdb::LsaIdentifer {
+            lsa_type: ROUTER_LSA_TYPE as u32,
+            link_state_id: self.header.link_state_id,
+            advertising_router: self.header.advertising_router,
+        }
+    }
     pub fn try_from_be_bytes(payload: &[u8]) -> Option<Self> {
         if payload.len() < super::Header::length() + 4 {
             return None;

@@ -1,3 +1,7 @@
+use core::net;
+
+use crate::area::lsdb;
+
 #[derive(Clone)]
 pub struct NetworkLSA {
     pub header: super::Header,
@@ -5,10 +9,19 @@ pub struct NetworkLSA {
     pub attached_rtrs: Vec<u32>,
 }
 
-
 pub const NETWORK_LSA_TYPE: u8 = 2;
 
 impl NetworkLSA {
+    pub async fn new(iaddr: net::Ipv4Addr) -> Self {
+        unimplemented!()
+    }
+    pub fn build_identifier(&self) -> lsdb::LsaIdentifer {
+        lsdb::LsaIdentifer {
+            lsa_type: NETWORK_LSA_TYPE as u32,
+            link_state_id: self.header.link_state_id,
+            advertising_router: self.header.advertising_router,
+        }
+    }
     pub fn length(&self) -> usize {
         super::Header::length() + 4 + self.attached_rtrs.len() * 4
     }

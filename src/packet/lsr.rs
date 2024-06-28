@@ -1,63 +1,63 @@
 use core::net;
+use std::io::empty;
 
 use pnet::packet::{
     ip::IpNextHeaderProtocol,
     ipv4::{Ipv4Packet, MutableIpv4Packet},
 };
 
-use crate::{interface::{self, NetworkType}, OSPF_IP_PROTOCOL};
+use crate::{
+    area::{self, lsdb::LsaIdentifer},
+    interface::{self, get_area_id, handle::start_send_lsu, NetworkType},
+    neighbor, OSPF_IP_PROTOCOL, OSPF_VERSION,
+};
+
+use super::ospf_packet_checksum;
 
 pub const LSR_TYPE: u8 = 3;
 #[derive(Clone)]
 pub struct Lsr {
     pub header: super::OspfHeader,
-    pub lsr_entries: Vec<LsrEntry>,
-}
-
-#[derive(Clone, Copy)]
-pub struct LsrEntry {
-    pub lsa_type: u32,
-    pub lsa_id: u32,
-    pub advertising_router: u32,
-}
-
-impl LsrEntry {
-    pub fn to_be_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(&self.lsa_type.to_be_bytes());
-        bytes.extend_from_slice(&self.lsa_id.to_be_bytes());
-        bytes.extend_from_slice(&self.advertising_router.to_be_bytes());
-        bytes
-    }
-    pub fn length() -> usize {
-        12
-    }
-    pub fn try_from_be_bytes(payload: &[u8]) -> Option<Self> {
-        if payload.len() < 12 {
-            return None;
-        }
-        Some(Self {
-            lsa_type: u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]),
-            lsa_id: u32::from_be_bytes([payload[4], payload[5], payload[6], payload[7]]),
-            advertising_router: u32::from_be_bytes([payload[8], payload[9], payload[10], payload[11]]),
-        })
-    }
+    pub lsr_entries: Vec<LsaIdentifer>,
 }
 
 impl Lsr {
+    pub async fn new(iaddr: net::Ipv4Addr, lsr_entries: Vec<LsaIdentifer>) -> Self {
+        let interface = interface::INTERFACE_MAP.read().await;
+        let locked_interface = interface.get(&iaddr).unwrap();
+        let mut header = Self::empty();
+        header.header.router_id = crate::ROUTER_ID.clone();
+        header.header.area_id = locked_interface.area_id;
+        header.header.auth_type = locked_interface.auth_type;
+        header.header.authentication = locked_interface.auth_key;
+        header.header.packet_length = 0;
+        header.header.packet_type = LSR_TYPE;
+        header.lsr_entries = lsr_entries;
+        header.header.packet_length = header.length() as u16;
+        header.header.checksum = ospf_packet_checksum(&header.to_be_bytes());
+        header
+    }
     pub fn empty() -> Self {
         Self {
             header: super::OspfHeader::empty(),
             lsr_entries: Vec::new(),
         }
     }
-    pub fn get_neighbor_addr(&self, network_type: NetworkType, paddr: net::Ipv4Addr) -> net::Ipv4Addr {
+    pub fn get_neighbor_addr(
+        &self,
+        network_type: NetworkType,
+        paddr: net::Ipv4Addr,
+    ) -> net::Ipv4Addr {
         match network_type {
             NetworkType::Broadcast | NetworkType::NBMA | NetworkType::PointToMultipoint => paddr,
             _ => self.header.router_id,
         }
     }
-    pub fn get_neighbor_id(&self, network_type: NetworkType, paddr: net::Ipv4Addr) -> net::Ipv4Addr {
+    pub fn get_neighbor_id(
+        &self,
+        network_type: NetworkType,
+        paddr: net::Ipv4Addr,
+    ) -> net::Ipv4Addr {
         match network_type {
             NetworkType::Broadcast | NetworkType::NBMA | NetworkType::PointToMultipoint => {
                 self.header.router_id
@@ -73,7 +73,7 @@ impl Lsr {
         let mut lsa_entries = Vec::new();
         let mut offset = super::OspfHeader::length();
         while offset < payload.len() {
-            let lsr_entry = LsrEntry::try_from_be_bytes(&payload[offset..])?;
+            let lsr_entry = LsaIdentifer::try_from_be_bytes(&payload[offset..])?;
             lsa_entries.push(lsr_entry);
             offset += crate::lsa::Header::length();
         }
@@ -83,15 +83,40 @@ impl Lsr {
         })
     }
     pub fn length(&self) -> usize {
-        super::OspfHeader::length() + LsrEntry::length() * self.lsr_entries.len()
+        super::OspfHeader::length() + LsaIdentifer::length() * self.lsr_entries.len()
     }
-    pub async fn received(lsr_packet: Lsr) {}
-    pub fn build_ipv4_packet<'a>(
+    pub async fn received(lsr_packet: Lsr, naddr: net::Ipv4Addr, iaddr: net::Ipv4Addr) {
+        let status = neighbor::get_status(iaddr, naddr).await;
+        match status {
+            neighbor::status::Status::Exchange
+            | neighbor::status::Status::Loading
+            | neighbor::status::Status::Full => {
+                crate::util::log(&format!("Received LSR packet from {} on {}", naddr, iaddr));
+                let lsa_identifiers = lsr_packet.lsr_entries.clone();
+                neighbor::fill_retrans_list(iaddr, naddr, lsa_identifiers.clone()).await;
+                if let None = area::lsdb::fetch_lsas(iaddr, lsa_identifiers).await {
+                    neighbor::event::send(iaddr, naddr, neighbor::event::Event::BadLSReq).await;
+                } else {
+                    start_send_lsu(iaddr, naddr).await;
+                    crate::util::log(&format!(
+                        "LSAs sent to {} on {} by lsu packet.",
+                        naddr, iaddr
+                    ));
+                }
+            }
+            _ => {
+                crate::util::error(
+                    "Received LSR packet when neighbor's status is not right, discarded.",
+                );
+                return;
+            }
+        }
+    }
+    pub async fn build_ipv4_packet<'a>(
         &'a self,
         buffer: &'a mut Vec<u8>,
-        network_type: interface::NetworkType,
-        int_ipv4_addr: net::Ipv4Addr,
-        destination_addr: net::Ipv4Addr,
+        iaddr: net::Ipv4Addr,
+        naddr: net::Ipv4Addr,
     ) -> Result<Ipv4Packet<'a>, &'static str> {
         let mut packet = match MutableIpv4Packet::new(buffer) {
             Some(packet) => packet,
@@ -102,13 +127,17 @@ impl Lsr {
         packet.set_total_length(20 + self.length() as u16);
         packet.set_ttl(1);
         packet.set_next_level_protocol(IpNextHeaderProtocol(OSPF_IP_PROTOCOL));
-        packet.set_source(int_ipv4_addr);
+        packet.set_source(iaddr);
+        let interface = interface::INTERFACE_MAP.read().await;
+        let locked_interface = interface.get(&iaddr).unwrap();
+        let network_type = locked_interface.network_type;
+        drop(interface);
         match network_type {
             interface::NetworkType::Broadcast => {
                 packet.set_destination([224, 0, 0, 5].into());
             }
             interface::NetworkType::PointToPoint => {
-                packet.set_destination([224, 0, 0, 5].into());
+                packet.set_destination(naddr);
             }
             interface::NetworkType::NBMA => {
                 packet.set_destination([224, 0, 0, 5].into());
@@ -117,7 +146,7 @@ impl Lsr {
                 packet.set_destination([224, 0, 0, 5].into());
             }
             interface::NetworkType::VirtualLink => {
-                packet.set_destination([224, 0, 0, 5].into());
+                packet.set_destination(naddr);
             }
         }
         packet.set_payload(&self.to_be_bytes());
