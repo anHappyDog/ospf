@@ -5,10 +5,9 @@ use tokio::sync::{broadcast, RwLock};
 use crate::{
     area,
     interface::{
-        self, get_area_id,
+        self,
         handle::{start_dd_send, start_send_lsr, stop_dd_send},
     },
-    lsa,
 };
 
 use super::handle::abort_inactive_timer;

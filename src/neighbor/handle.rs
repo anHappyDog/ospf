@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use tokio::sync::RwLock;
 
-use crate::interface::{self, handle};
+use crate::interface::{self};
 
 lazy_static::lazy_static! {
     pub static ref HANDLE_MAP : Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<HashMap<net::Ipv4Addr,Handle>>>>>> = Arc::new(RwLock::new(HashMap::new()));

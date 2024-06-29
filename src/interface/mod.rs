@@ -7,12 +7,8 @@ use std::net;
 
 use std::{collections::HashMap, net::Ipv4Addr, sync::Arc};
 
-use pnet::datalink::Channel::Ethernet;
-use pnet::datalink::EtherType;
-use pnet::packet::ethernet::EtherTypes;
 use pnet::{
-    datalink::{self, Config},
-    packet::ip,
+    datalink::{self},
 };
 use tokio::sync::RwLock;
 
@@ -233,6 +229,14 @@ pub async fn add(interface: &datalink::NetworkInterface) {
     let mut interface_status_map = INTERFACE_STATUS_MAP.write().await;
     interface_status_map.insert(ip, Arc::new(RwLock::new(status::Status::Down)));
     drop(interface_status_map);
+
+    let mut dr_map = DR_MAP.write().await;
+    dr_map.insert(ip, net::Ipv4Addr::new(0, 0, 0, 0));
+    drop(dr_map);
+
+    let mut bdr_map = BDR_MAP.write().await;
+    bdr_map.insert(ip, net::Ipv4Addr::new(0, 0, 0, 0));
+    drop(bdr_map);
 
     crate::util::log(&format!("Interface {} added.", ip));
 }

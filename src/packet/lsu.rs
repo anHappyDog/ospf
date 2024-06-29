@@ -7,8 +7,7 @@ use pnet::packet::{
 use tokio::sync::RwLock;
 
 use crate::{
-    area::lsdb,
-    interface::{self, handle::start_send_lsack, NetworkType},
+    interface::{self, NetworkType},
     lsa::{self, Lsa},
     neighbor, OSPF_IP_PROTOCOL, OSPF_VERSION,
 };

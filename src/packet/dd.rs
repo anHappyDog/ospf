@@ -1,5 +1,5 @@
 use core::net;
-use std::{net::Ipv4Addr, thread::panicking};
+use std::{net::Ipv4Addr};
 
 use pnet::{
     packet::{
@@ -10,8 +10,8 @@ use pnet::{
 };
 
 use crate::{
-    area::{self, lsdb::fetch_lsa_headers},
-    interface::{self, get_area_id, handle::start_dd_send, NetworkType},
+    area::{lsdb::fetch_lsa_headers},
+    interface::{self, handle::start_dd_send, NetworkType},
     lsa, neighbor, OSPF_IP_PROTOCOL,
 };
 

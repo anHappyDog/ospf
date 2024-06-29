@@ -1,13 +1,17 @@
 pub mod graph;
 pub mod spt;
-
 use std::net;
+use std::sync::Arc;
 
+use tokio::sync::RwLock;
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DestionationType {
     Network,
     Router,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PathType {
     IntraArea,
     InterArea,
@@ -15,6 +19,7 @@ pub enum PathType {
     ExternalType2,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RouteTableEntry {
     pub destination_type: DestionationType,
     pub destination_id: net::Ipv4Addr,
@@ -31,4 +36,26 @@ pub struct RouteTableEntry {
 
 pub struct RouteTable {
     pub entries: Vec<RouteTableEntry>,
+}
+
+impl RouteTable {
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+        }
+    }
+    pub fn add_entry(&mut self, entry: RouteTableEntry) {
+        self.entries.push(entry);
+    }
+    pub fn remove_entry(&mut self, entry: RouteTableEntry) {
+        self.entries.retain(|e| e != &entry);
+    }
+}
+
+lazy_static::lazy_static! {
+    pub static ref ROUTE_TABLE : Arc<RwLock<RouteTable>> = Arc::new(RwLock::new(RouteTable::new()));
+}
+
+pub async fn update_route_table() {
+    unimplemented!()
 }

@@ -1,11 +1,10 @@
 use std::{collections::HashMap, fmt::Debug, net, sync::Arc};
 
 use tokio::{
-    runtime::Handle,
     sync::{broadcast, RwLock},
 };
 
-use super::handle::{self, start_dd_send};
+use super::handle::{start_dd_send};
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub enum Event {
     InterfaceUp,

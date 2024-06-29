@@ -1,5 +1,4 @@
 use core::net;
-use std::io::empty;
 
 use pnet::packet::{
     ip::IpNextHeaderProtocol,
@@ -8,8 +7,8 @@ use pnet::packet::{
 
 use crate::{
     area::{self, lsdb::LsaIdentifer},
-    interface::{self, get_area_id, handle::start_send_lsu, NetworkType},
-    neighbor, OSPF_IP_PROTOCOL, OSPF_VERSION,
+    interface::{self, handle::start_send_lsu, NetworkType},
+    neighbor, OSPF_IP_PROTOCOL,
 };
 
 use super::ospf_packet_checksum;

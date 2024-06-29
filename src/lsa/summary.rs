@@ -1,3 +1,5 @@
+use core::net;
+
 use crate::area::lsdb;
 
 #[derive(Clone)]
@@ -12,6 +14,9 @@ pub const SUMMARY_LSA_TYPE_3: u8 = 3;
 pub const SUMMARY_LSA_TYPE_4: u8 = 4;
 
 impl SummaryLSA {
+    pub async fn new(iaddr : net::Ipv4Addr) -> Self {
+        unimplemented!()
+    }
     pub fn build_identifier(&self) -> lsdb::LsaIdentifer {
         lsdb::LsaIdentifer {
             lsa_type: self.header.lsa_type as u32,

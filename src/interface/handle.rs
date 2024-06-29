@@ -1,42 +1,26 @@
 use crate::neighbor::get_ddseqno;
 use crate::packet::dd::FLAG_MS_BIT;
+use crate::packet::lsack::Lsack;
 use crate::packet::lsu::Lsu;
-use crate::packet::OspfPacket;
-use crate::{area, lsa, ALL_DROTHERS, OPTION_E};
-use bytes::buf;
+use crate::{area, lsa, OPTION_E};
 use pnet::datalink::Channel::Ethernet;
-use pnet::datalink::{interfaces, DataLinkReceiver, DataLinkSender};
-use pnet::packet::ethernet::{EtherType, EtherTypes, MutableEthernetPacket};
-use pnet::packet::ip::{IpNextHeaderProtocol, IpNextHeaderProtocols};
+use pnet::datalink::{DataLinkReceiver, DataLinkSender};
+use pnet::packet::ethernet::EtherTypes;
+use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv4::Ipv4Packet;
-use pnet::util::MacAddr;
 use pnet::{
     datalink::{self, Config},
     packet::{
-        self,
-        ip::{
-            self,
-            IpNextHeaderProtocols::{Tcp, Udp},
-        },
+        ip::{self},
         ipv4, Packet,
     },
     transport,
 };
-use socket2::{Domain, Protocol, Type};
-use std::str::FromStr;
 use std::{collections::HashMap, net, sync::Arc};
 use tokio::task::JoinHandle;
-use tokio::{
-    sync::{broadcast, RwLock},
-    time,
-};
+use tokio::{sync::RwLock, time};
 
-use crate::packet::hello::Hello;
-use crate::{
-    neighbor,
-    packet::{dd::DD, hello::HELLO_TYPE},
-    IPV4_PACKET_MTU, OSPF_IP_PROTOCOL,
-};
+use crate::{neighbor, packet::dd::DD, IPV4_PACKET_MTU, OSPF_IP_PROTOCOL};
 
 use super::status;
 
@@ -105,7 +89,9 @@ pub async fn send_lsu(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr) {
             }
         };
         let lsu_packet = Lsu::new(iaddr, naddr, lsas.clone()).await;
-        let ip_packet = Lsu::build_ipv4_packet(lsu_packet.clone(),&mut buffer, iaddr, naddr).await.unwrap();
+        let ip_packet = Lsu::build_ipv4_packet(lsu_packet.clone(), &mut buffer, iaddr, naddr)
+            .await
+            .unwrap();
         match packet_sender.send(bytes::Bytes::from(ip_packet.packet().to_vec())) {
             Ok(_) => {
                 crate::util::debug("send lsu packet success.");
@@ -134,6 +120,12 @@ pub async fn start_send_lsack(
     locked_int_handles.lsack_send = Some(lsack_send);
 }
 
+pub async fn create_router_lsa(iaddr: net::Ipv4Addr) {}
+
+pub async fn create_network_lsa(iaddr: net::Ipv4Addr) {}
+
+pub async fn create_summary_lsa(iaddr: net::Ipv4Addr) {}
+
 pub async fn stop_send_lsack(iaddr: net::Ipv4Addr) {
     let g_handles = HANDLE_MAP.read().await;
     let int_handles = g_handles.get(&iaddr).unwrap();
@@ -149,8 +141,21 @@ pub async fn send_lsack(
     naddr: net::Ipv4Addr,
     lsa_headers: Option<Vec<lsa::Header>>,
 ) {
-    //TODO
-    
+    let lsack_packet = Lsack::new(iaddr, naddr, lsa_headers.clone()).await;
+    let mut buffer: Vec<u8> = vec![0; crate::IPV4_PACKET_MTU];
+    let ip_packet = lsack_packet
+        .build_ipv4_packet(&mut buffer, iaddr, naddr)
+        .await
+        .unwrap();
+    let packet_sender = super::trans::PACKET_SENDER.clone();
+    match packet_sender.send(bytes::Bytes::from(ip_packet.packet().to_vec())) {
+        Ok(_) => {
+            crate::util::debug("send lsack packet success.");
+        }
+        Err(e) => {
+            crate::util::error(&format!("send lsack packet failed:{}", e));
+        }
+    }
 }
 
 pub async fn send_lsr(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr) {

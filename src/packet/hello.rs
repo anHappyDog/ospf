@@ -1,18 +1,15 @@
 use std::{
     net::{self, Ipv4Addr},
-    sync::Arc,
 };
 
 use pnet::packet::{
     ip::IpNextHeaderProtocol,
     ipv4::{Ipv4Packet, MutableIpv4Packet},
 };
-use tokio::sync::RwLock;
 
 use crate::{
     area,
-    interface::{self, NetworkType},
-    lsa, neighbor, util, OSPF_IP_PROTOCOL, OSPF_VERSION,
+    interface::{self, NetworkType}, neighbor, util, OSPF_IP_PROTOCOL, OSPF_VERSION,
 };
 
 use super::ospf_packet_checksum;

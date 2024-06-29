@@ -1,11 +1,10 @@
-use core::{net, time};
+use core::{net};
 use std::{collections::HashMap, sync::Arc};
 
 use tokio::{sync::RwLock, task::JoinHandle};
 
 use crate::{
     lsa::{self, Header, Lsa},
-    packet::{self, dd::DD},
 };
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
@@ -190,6 +189,7 @@ pub async fn update_lsdb(iaddr: net::Ipv4Addr, lsas: Vec<Lsa>) {
     let lsdb = lsdb_map.get(&area_id).unwrap();
     let mut locked_lsdb = lsdb.write().await;
     locked_lsdb.update_lsdb(lsas).await;
+    // here we should notify the SPF module that the LSDB has been updated
 }
 
 pub async fn get_lsdb(area_id: net::Ipv4Addr) -> Arc<RwLock<LsaDb>> {
@@ -214,28 +214,24 @@ async fn age_lsa(area_id: net::Ipv4Addr) {
         for (_, rlsa) in router_lsa_list.iter() {
             let mut locked_rlsa = rlsa.write().await;
             locked_rlsa.header.age += age_interval as u16;
-            // TODO check the age is valid or not MaxAge
         }
         drop(router_lsa_list);
         let network_lsa_list = locked_lsdb.network_lsa.read().await;
         for (_, nlsa) in network_lsa_list.iter() {
             let mut locked_nlsa = nlsa.write().await;
             locked_nlsa.header.age += age_interval as u16;
-            // TODO check the age is valid or not MaxAge
         }
         drop(network_lsa_list);
         let summary_lsa_list = locked_lsdb.summary_lsa.read().await;
         for (_, slsa) in summary_lsa_list.iter() {
             let mut locked_slsa = slsa.write().await;
             locked_slsa.header.age += age_interval as u16;
-            // TODO check the age is valid or not MaxAge
         }
         drop(summary_lsa_list);
         let as_external_lsa_list = locked_lsdb.as_external_lsa.read().await;
         for (_, aslsa) in as_external_lsa_list.iter() {
             let mut locked_aslsa = aslsa.write().await;
             locked_aslsa.header.age += age_interval as u16;
-            // TODO check the age is valid or not MaxAge
         }
         drop(as_external_lsa_list);
     }

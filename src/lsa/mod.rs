@@ -1,12 +1,10 @@
 use core::net;
-use std::{collections::HashMap, sync::Arc};
 
 use as_external::AS_EXTERNAL_LSA_TYPE;
 use network::NETWORK_LSA_TYPE;
 use pnet::util::Octets;
 use router::ROUTER_LSA_TYPE;
 use summary::{SUMMARY_LSA_TYPE_3, SUMMARY_LSA_TYPE_4};
-use tokio::sync::RwLock;
 
 use crate::area::lsdb;
 

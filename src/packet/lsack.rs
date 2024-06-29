@@ -1,4 +1,4 @@
-use std::net;
+use std::{any::Any, net};
 
 use pnet::packet::{
     ip::IpNextHeaderProtocol,
@@ -8,8 +8,11 @@ use pnet::packet::{
 use crate::{
     area::lsdb::LsaIdentifer,
     interface::{self, NetworkType},
-    lsa, neighbor, ALL_SPF_ROUTERS, OSPF_IP_PROTOCOL,
+    lsa::{self, network},
+    neighbor, ALL_SPF_ROUTERS, OSPF_IP_PROTOCOL,
 };
+
+use super::ospf_packet_checksum;
 
 pub const LSACK_TYPE: u8 = 5;
 
@@ -19,6 +22,27 @@ pub struct Lsack {
 }
 
 impl Lsack {
+    pub async fn new(
+        iaddr: net::Ipv4Addr,
+        naddr: net::Ipv4Addr,
+        headers: Option<Vec<crate::lsa::Header>>,
+    ) -> Self {
+        let mut lsack = Self::empty();
+        let interfaces = interface::INTERFACE_MAP.read().await;
+        let interface = interfaces.get(&iaddr).unwrap();
+        lsack.header.router_id = crate::ROUTER_ID.clone();
+        lsack.header.area_id = interface.area_id;
+        lsack.header.auth_type = interface.auth_type;
+        lsack.header.authentication = interface.auth_key;
+        lsack.header.packet_length = 0;
+        lsack.header.packet_type = LSACK_TYPE;
+        if let Some(t) = headers {
+            lsack.lsa_headers.extend(t);  
+        }
+        lsack.header.packet_length = lsack.length() as u16;
+        lsack.header.checksum = ospf_packet_checksum(&lsack.to_be_bytes());
+        lsack
+    }
     pub fn to_be_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&self.header.to_be_bytes());
@@ -86,29 +110,29 @@ impl Lsack {
             neighbor::ack_lsa(iaddr, naddr, lsa_identifer).await;
         }
     }
-    pub fn build_ipv4_packet<'a>(
+    pub async  fn build_ipv4_packet<'a>(
         &'a self,
         buffer: &'a mut Vec<u8>,
-        network_type: interface::NetworkType,
-        int_ipv4_addr: net::Ipv4Addr,
-        destination_addr: net::Ipv4Addr,
+        iaddr: net::Ipv4Addr,
+        naddr: net::Ipv4Addr,
     ) -> Result<Ipv4Packet<'a>, &'static str> {
         let mut packet = match MutableIpv4Packet::new(buffer) {
             Some(packet) => packet,
             None => return Err("Failed to construct packet"),
         };
+        let network_type = interface::get_network_type(iaddr).await;
         packet.set_version(4);
         packet.set_header_length(5);
         packet.set_total_length(20 + self.length() as u16);
         packet.set_ttl(1);
         packet.set_next_level_protocol(IpNextHeaderProtocol(OSPF_IP_PROTOCOL));
-        packet.set_source(int_ipv4_addr);
+        packet.set_source(iaddr);
         match network_type {
             interface::NetworkType::Broadcast => {
                 packet.set_destination(ALL_SPF_ROUTERS);
             }
             interface::NetworkType::PointToPoint => {
-                packet.set_destination(destination_addr);
+                packet.set_destination(naddr);
             }
             interface::NetworkType::NBMA => {
                 packet.set_destination(ALL_SPF_ROUTERS);
@@ -117,7 +141,7 @@ impl Lsack {
                 packet.set_destination(ALL_SPF_ROUTERS);
             }
             interface::NetworkType::VirtualLink => {
-                packet.set_destination(destination_addr);
+                packet.set_destination(naddr);
             }
         }
         packet.set_payload(&self.to_be_bytes());

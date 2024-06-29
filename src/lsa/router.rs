@@ -1,6 +1,6 @@
 use core::net;
 
-use crate::{area::lsdb, interface, OPTION_E};
+use crate::{area::lsdb, interface};
 
 #[derive(Clone)]
 pub struct RouterLSA {
