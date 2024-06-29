@@ -1,11 +1,9 @@
-use core::{net};
+use core::net;
 use std::{collections::HashMap, sync::Arc};
 
 use tokio::{sync::RwLock, task::JoinHandle};
 
-use crate::{
-    lsa::{self, Header, Lsa},
-};
+use crate::lsa::{self, Header, Lsa};
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
 pub struct LsaIdentifer {
@@ -61,7 +59,36 @@ lazy_static::lazy_static! {
 }
 
 impl LsaDb {
-    pub async fn update_lsdb(&mut self, lsas: Vec<Lsa>) {}
+    pub async fn update_lsdb(&mut self, lsas: Vec<Lsa>) {
+        for lsa in lsas {
+            match lsa {
+                Lsa::Router(rlsa) => {
+                    let lsa_id = LsaIdentifer::from_header(&rlsa.header);
+                    let mut router_lsa = self.router_lsa.write().await;
+                    let arlsa = Arc::new(RwLock::new(rlsa));
+                    router_lsa.insert(lsa_id, arlsa);
+                }
+                Lsa::Network(nlsa) => {
+                    let lsa_id = LsaIdentifer::from_header(&nlsa.header);
+                    let mut network_lsa = self.network_lsa.write().await;
+                    let anlsa = Arc::new(RwLock::new(nlsa));
+                    network_lsa.insert(lsa_id, anlsa);
+                }
+                Lsa::Summary(slsa) => {
+                    let lsa_id = LsaIdentifer::from_header(&slsa.header);
+                    let mut summary_lsa = self.summary_lsa.write().await;
+                    let slsa = Arc::new(RwLock::new(slsa));
+                    summary_lsa.insert(lsa_id, slsa);
+                }
+                Lsa::ASExternal(aslsa) => {
+                    let lsa_id = LsaIdentifer::from_header(&aslsa.header);
+                    let mut as_external_lsa = self.as_external_lsa.write().await;
+                    let aslsa = Arc::new(RwLock::new(aslsa));
+                    as_external_lsa.insert(lsa_id, aslsa);
+                }
+            }
+        }
+    }
     pub async fn contains_lsa(&self, lsa_id: LsaIdentifer) -> bool {
         let router_lsa = self.router_lsa.read().await;
         if router_lsa.contains_key(&lsa_id) {
@@ -150,6 +177,26 @@ impl LsaDb {
         }
         None
     }
+    pub async fn remove_lsa(&mut self, identifer: LsaIdentifer) {
+        let mut router_lsa = self.router_lsa.write().await;
+        router_lsa.remove(&identifer);
+        drop(router_lsa);
+        let mut network_lsa = self.network_lsa.write().await;
+        network_lsa.remove(&identifer);
+        drop(network_lsa);
+        let mut summary_lsa = self.summary_lsa.write().await;
+        summary_lsa.remove(&identifer);
+        drop(summary_lsa);
+        let mut as_external_lsa = self.as_external_lsa.write().await;
+        as_external_lsa.remove(&identifer);
+    }
+}
+
+pub async fn try_remove_lsa(area_id: net::Ipv4Addr, lsa_identifier: LsaIdentifer) {
+    let lsdb_map = LSDB_MAP.read().await;
+    let lsdb = lsdb_map.get(&area_id).unwrap();
+    let mut locked_lsdb = lsdb.write().await;
+    locked_lsdb.remove_lsa(lsa_identifier).await;
 }
 
 pub async fn fetch_lsa_headers(iaddr: net::Ipv4Addr) -> Vec<Header> {

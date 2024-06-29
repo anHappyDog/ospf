@@ -1,6 +1,7 @@
-use crate::lsa::router::{LinkState, RouterLSA, LS_ID_STUB};
-use crate::lsa::summary;
-use crate::neighbor::get_ddseqno;
+use crate::area::lsdb::update_lsdb;
+use crate::lsa::router::{LinkState, RouterLSA, LS_ID_STUB, LS_ID_TRANSIT};
+use crate::lsa::{summary, Lsa};
+use crate::neighbor::{get_ddseqno, get_int_neighbors};
 use crate::packet::dd::FLAG_MS_BIT;
 use crate::packet::lsack::Lsack;
 use crate::packet::lsu::Lsu;
@@ -124,13 +125,17 @@ pub async fn start_send_lsack(
 }
 
 // the should be called when the interface's status is changed
-pub async fn create_router_lsa() {
+pub async fn create_router_lsa(iaddr: net::Ipv4Addr) {
+    let area_id = super::get_area_id(iaddr).await;
     let imap = INTERFACE_MAP.read().await;
     let mut links = Vec::new();
-    for (iaddr, int) in *imap {
+    for (iaddr, int) in &*imap {
         // you should judge whether the interface's network
         // belongs to the area.
-        let istatus = super::get_status(iaddr).await;
+        if int.area_id != area_id {
+            continue;
+        }
+        let istatus = super::get_status(iaddr.clone()).await;
         let network_type = int.network_type;
         let mask = int.mask;
         let metric = int.output_cost;
@@ -145,8 +150,8 @@ pub async fn create_router_lsa() {
                 }
                 _ => {
                     links.push(LinkState::new(
-                        iaddr,
-                        net::Ipv4Addr::new(255, 255, 255, 255),
+                        iaddr.clone().into(),
+                        net::Ipv4Addr::new(255, 255, 255, 255).into(),
                         LS_ID_STUB,
                         0,
                         None,
@@ -162,8 +167,8 @@ pub async fn create_router_lsa() {
                     match istatus {
                         super::status::Status::Waiting => {
                             links.push(LinkState::new(
-                                iaddr.bitand(mask), // get the network's ip address
-                                mask,
+                                iaddr.bitand(mask).into(), // get the network's ip address
+                                mask.into(),
                                 LS_ID_STUB,
                                 0,
                                 None,
@@ -171,41 +176,81 @@ pub async fn create_router_lsa() {
                             ));
                         }
                         _ => {
-                            let (is_dr_exists, nstatus) =
-                                super::get_dr_neighbor_status(iaddr).await;
-                            if is_dr_exists {
+                            let dr_id = super::get_dr(iaddr.clone()).await;
+                            if dr_id == net::Ipv4Addr::new(0, 0, 0, 0) {
+                                links.push(LinkState::new(
+                                    iaddr.bitand(mask).into(), // get the network's ip address
+                                    mask.into(),
+                                    LS_ID_STUB,
+                                    0,
+                                    None,
+                                    metric as u16,
+                                ));
+                            } else if dr_id == crate::ROUTER_ID.clone() {
+                                // check whether one neighbor is exstart or higher
+                                let neighbors = get_int_neighbors(iaddr.clone()).await;
+                                let mut flag = false;
+                                let locked_neighbors = neighbors.read().await;
+                                for (naddr, _) in locked_neighbors.iter() {
+                                    if neighbor::get_status(iaddr.clone(), naddr.clone()).await
+                                        >= neighbor::status::Status::ExStart
+                                    {
+                                        flag = true;
+                                        break;
+                                    }
+                                }
+                                if flag {
+                                    links.push(LinkState::new(
+                                        iaddr.clone().into(), // get the network's ip address
+                                        iaddr.clone().into(),
+                                        LS_ID_TRANSIT,
+                                        0,
+                                        None,
+                                        metric as u16,
+                                    ));
+                                } else {
+                                    links.push(LinkState::new(
+                                        iaddr.bitand(mask).into(), // get the network's ip address
+                                        mask.into(),
+                                        LS_ID_STUB,
+                                        0,
+                                        None,
+                                        metric as u16,
+                                    ));
+                                }
+                            } else {
+                                let nstatus =
+                                    neighbor::get_status_by_id(iaddr.clone(), dr_id).await;
                                 match nstatus {
-                                    some(nstatus) => {
-                                        if let neighbor::status::Status::Full = nstatus {
+                                    Some(nstatus) => {
+                                        if nstatus == neighbor::status::Status::Full {
+                                            let naddr =
+                                                neighbor::get_naddr_by_id(iaddr.clone(), dr_id)
+                                                    .await
+                                                    .unwrap();
                                             links.push(LinkState::new(
-
+                                                naddr.clone().into(),
+                                                iaddr.clone().into(),
+                                                LS_ID_TRANSIT,
+                                                0,
+                                                None,
+                                                metric as u16,
                                             ));
                                         } else {
                                             links.push(LinkState::new(
-                                                iaddr.bitand(mask), // get the network's ip address
-                                                mask,
+                                                iaddr.bitand(mask).into(), // get the network's ip address
+                                                mask.into(),
                                                 LS_ID_STUB,
                                                 0,
                                                 None,
                                                 metric as u16,
                                             ));
                                         }
-                                    },
+                                    }
                                     None => {
-                                        // it means the router self is the DR
-                                        // check all the neighbors whether exists one neighbor is exstart or higher
-
+                                        crate::util::error("can't get the dr's neighbor's status");
                                     }
                                 }
-                            } else {
-                                links.push(LinkState::new(
-                                    iaddr.bitand(mask), // get the network's ip address
-                                    mask,
-                                    LS_ID_STUB,
-                                    0,
-                                    None,
-                                    metric as u16,
-                                ));
                             }
                         }
                     }
@@ -216,11 +261,12 @@ pub async fn create_router_lsa() {
                 super::NetworkType::VirtualLink => {}
                 _ => {
                     links.push(LinkState::new(
-                        iaddr,
-                        net::Ipv4Addr::new(255, 255, 255, 255),
+                        iaddr.clone().into(),
+                        net::Ipv4Addr::new(255, 255, 255, 255).into(),
                         LS_ID_STUB,
                         0,
                         None,
+                        metric as u16,
                     ));
                 }
             },
@@ -228,6 +274,9 @@ pub async fn create_router_lsa() {
         // after process the interface, you should also process the
         // host that connected to  the area, but here we just ignore it.
     }
+    let router_lsa = RouterLSA::new(links, OPTION_E).await;
+    let lsas = vec![Lsa::Router(router_lsa)];
+    area::lsdb::update_lsdb(iaddr, lsas).await;
 }
 
 pub async fn create_network_lsa(iaddr: net::Ipv4Addr) {}

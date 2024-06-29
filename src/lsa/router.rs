@@ -10,10 +10,10 @@ pub struct RouterLSA {
     pub link_states: Vec<LinkState>,
 }
 
-pub const LS_ID_POINT_TO_POINT: u32 = 1;
-pub const LS_ID_TRANSIT: u32 = 2;
-pub const LS_ID_STUB: u32 = 3;
-pub const LS_ID_VIRTUAL_LINK: u32 = 4;
+pub const LS_ID_POINT_TO_POINT: u8 = 1;
+pub const LS_ID_TRANSIT: u8 = 2;
+pub const LS_ID_STUB: u8 = 3;
+pub const LS_ID_VIRTUAL_LINK: u8 = 4;
 
 pub const ROUTER_LSA_TYPE: u8 = 1;
 #[derive(Clone)]

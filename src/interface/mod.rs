@@ -96,18 +96,6 @@ pub async fn is_asbr() -> bool {
     false
 }
 
-pub async fn get_dr_neighbor_status(iaddr: net::Ipv4Addr) -> (bool,Option<neighbor::status::Status>) {
-    let dr_id = get_dr(iaddr).await;
-    if let net::Ipv4Addr::new(0, 0, 0, 0) = dr_id {
-        // no dr yet.
-        return (false,None);
-    }
-    if crate::ROUTER_ID.clone() == dr_id {
-        return (true,None);
-    }
-    let neighbor_status = neighbor::get_status_by_id(iaddr, dr_id).await;
-    (true,Some(neighbor_status))
-}
 
 
 

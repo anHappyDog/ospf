@@ -1,5 +1,7 @@
 use std::{collections::HashMap, net, sync::Arc};
 
+use pnet::packet::ip::IpNextHeaderProtocols::Narp;
+use status::Status;
 use tokio::sync::RwLock;
 
 use crate::{
@@ -58,17 +60,33 @@ pub async fn get_int_neighbors(
     int_neighbors.get(&iaddr).unwrap().clone()
 }
 
+pub async fn get_naddr_by_id(
+    iaddr: net::Ipv4Addr,
+    neighbor_id : net::Ipv4Addr
+) -> Option<net::Ipv4Addr> {
+    let int_neighbors = INT_NEIGHBORS_MAP.read().await;
+    let neighbors = int_neighbors.get(&iaddr).unwrap();
+    let locked_neighbors = neighbors.read().await;
+    for (naddr, neighbor) in locked_neighbors.iter() {
+        let locked_neighbor = neighbor.read().await;
+        if locked_neighbor.id == neighbor_id {
+            return Some(naddr.clone())
+        }
+    }
+    return None;
+}
+ 
 pub async fn get_status_by_id(
     iaddr: net::Ipv4Addr,
     nid: net::Ipv4Addr,
-) -> Option<Arc<RwLock<Neighbor>>> {
+) -> Option<Status> {
     let int_neighbors = INT_NEIGHBORS_MAP.read().await;
     let neighbors = int_neighbors.get(&iaddr).unwrap();
     let locked_neighbors = neighbors.read().await;
     for (naddr, neighbor) in locked_neighbors.iter() {
         let locked_neighbor = neighbor.read().await;
         if locked_neighbor.id == nid {
-            return Some(neighbor.clone());
+            return Some(get_status(iaddr, naddr.clone()).await)
         }
     }
     return None;
