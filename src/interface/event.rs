@@ -1,10 +1,10 @@
 use std::{collections::HashMap, fmt::Debug, net, sync::Arc};
 
-use tokio::{
-    sync::{broadcast, RwLock},
-};
+use tokio::sync::{broadcast, RwLock};
 
-use super::handle::{start_dd_send};
+use crate::neighbor;
+
+use super::handle::start_dd_send;
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub enum Event {
     InterfaceUp,
@@ -96,7 +96,100 @@ impl Event {
 unsafe impl Send for Event {}
 
 pub async fn select_dr_bdr(iaddr: net::Ipv4Addr) -> super::status::Status {
-    unimplemented!()
+    let mut cur_dr = super::get_dr(iaddr).await;
+    let mut cur_bdr = super::get_bdr(iaddr).await;
+    let mut cur_priority = 0;
+    let mut bdr_selct_flag = false;
+    let new_bdr;
+    let mut max_priority = 0;
+    let mut max_priority_id = net::Ipv4Addr::new(0, 0, 0, 0);
+    let neighbors = neighbor::get_int_neighbors(iaddr).await;
+    let locked_neighbors = neighbors.read().await;
+    for (naddr, n) in &*locked_neighbors {
+        let status = neighbor::get_status(iaddr, naddr.clone()).await;
+        if status <= neighbor::status::Status::TwoWay {
+            continue;
+        }
+        let locked_neighbor = n.read().await;
+        if locked_neighbor.dr == locked_neighbor.id || locked_neighbor.priority == 0 {
+            continue;
+        }
+        if locked_neighbor.bdr == locked_neighbor.id {
+            if locked_neighbor.priority > cur_priority {
+                cur_priority = locked_neighbor.priority;
+                cur_bdr = locked_neighbor.id;
+                bdr_selct_flag = true;
+            } else if locked_neighbor.priority == cur_priority {
+                if locked_neighbor.id > cur_bdr {
+                    cur_bdr = locked_neighbor.id;
+                    bdr_selct_flag = true;
+                }
+            }
+        } else if !bdr_selct_flag {
+            if locked_neighbor.priority > max_priority {
+                max_priority = locked_neighbor.priority;
+                max_priority_id = locked_neighbor.id;
+            } else if locked_neighbor.priority == max_priority {
+                if locked_neighbor.id > cur_dr {
+                    cur_dr = locked_neighbor.id;
+                    max_priority_id = locked_neighbor.id;
+                }
+            }
+        }
+    }
+    if !bdr_selct_flag {
+        super::set_bdr(iaddr, max_priority_id).await;
+        new_bdr = max_priority_id;
+    } else {
+        super::set_bdr(iaddr, cur_bdr).await;
+        new_bdr = cur_bdr;
+    }
+    cur_priority = 0;
+    max_priority = 0;
+    max_priority_id = net::Ipv4Addr::new(0, 0, 0, 0);
+    bdr_selct_flag = false;
+    // the bdr select is over.
+    for (naddr, n) in &*locked_neighbors {
+        let status = neighbor::get_status(iaddr, naddr.clone()).await;
+        if status <= neighbor::status::Status::TwoWay {
+            continue;
+        }
+        let locked_neighbor = n.read().await;
+        if locked_neighbor.priority == 0 || locked_neighbor.id == new_bdr {
+            continue;
+        }
+        if locked_neighbor.dr == locked_neighbor.id {
+            if locked_neighbor.priority > cur_priority {
+                cur_priority = locked_neighbor.priority;
+                cur_dr = locked_neighbor.id;
+            } else if locked_neighbor.priority == cur_priority {
+                if locked_neighbor.id > cur_dr {
+                    cur_dr = locked_neighbor.id;
+                }
+            }
+        } else if !bdr_selct_flag {
+            if locked_neighbor.priority > max_priority {
+                max_priority = locked_neighbor.priority;
+                max_priority_id = locked_neighbor.id;
+            } else if locked_neighbor.priority == max_priority {
+                if locked_neighbor.id > cur_dr {
+                    max_priority_id = locked_neighbor.id;
+                }
+            }
+        }
+    }
+    if !bdr_selct_flag {
+        super::set_dr(iaddr, max_priority_id).await;
+    } else {
+        super::set_dr(iaddr, cur_dr).await;
+    }
+    if super::get_dr(iaddr).await == crate::ROUTER_ID.clone() {
+        super::status::Status::DR
+    } else if super::get_bdr(iaddr).await == crate::ROUTER_ID.clone() {
+        super::status::Status::Backup
+    } else {
+        super::status::Status::DRother
+    }
 }
 
 impl Debug for Event {

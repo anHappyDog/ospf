@@ -3,7 +3,7 @@ pub mod handle;
 pub mod status;
 pub mod trans;
 
-use std::{clone, net};
+use std::{net};
 
 use std::{collections::HashMap, net::Ipv4Addr, sync::Arc};
 
@@ -285,6 +285,16 @@ pub async fn init() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     Ok(())
+}
+
+pub async fn set_dr(iaddr: net::Ipv4Addr, dr: net::Ipv4Addr) {
+    let mut dr_map = DR_MAP.write().await;
+    dr_map.insert(iaddr, dr);
+}
+
+pub async fn set_bdr(iaddr: net::Ipv4Addr, bdr: net::Ipv4Addr) {
+    let mut bdr_map = BDR_MAP.write().await;
+    bdr_map.insert(iaddr, bdr);
 }
 
 pub async fn get_router_dead_interval(iaddr: net::Ipv4Addr) -> u32 {

@@ -1,4 +1,4 @@
-use std::{any::Any, net};
+use std::{net};
 
 use pnet::packet::{
     ip::IpNextHeaderProtocol,
@@ -8,7 +8,6 @@ use pnet::packet::{
 use crate::{
     area::lsdb::LsaIdentifer,
     interface::{self, NetworkType},
-    lsa::{self, network},
     neighbor, ALL_SPF_ROUTERS, OSPF_IP_PROTOCOL,
 };
 

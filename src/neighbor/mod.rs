@@ -1,6 +1,5 @@
 use std::{collections::HashMap, net, sync::Arc};
 
-use pnet::packet::ip::IpNextHeaderProtocols::Narp;
 use status::Status;
 use tokio::sync::RwLock;
 
@@ -75,7 +74,8 @@ pub async fn get_naddr_by_id(
     }
     return None;
 }
- 
+
+
 pub async fn get_status_by_id(
     iaddr: net::Ipv4Addr,
     nid: net::Ipv4Addr,

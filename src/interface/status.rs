@@ -2,6 +2,8 @@ use std::{fmt::Debug, net};
 
 use tokio::sync::broadcast;
 
+use super::handle::create_router_lsa;
+
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub enum Status {
@@ -75,5 +77,6 @@ pub async fn changed(iaddr: net::Ipv4Addr) -> () {
                 continue;
             }
         }
+        tokio::spawn(create_router_lsa(iaddr));
     }
 }

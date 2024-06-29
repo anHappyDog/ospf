@@ -1,11 +1,10 @@
-use crate::area::lsdb::update_lsdb;
 use crate::lsa::router::{LinkState, RouterLSA, LS_ID_STUB, LS_ID_TRANSIT};
-use crate::lsa::{summary, Lsa};
+use crate::lsa::Lsa;
 use crate::neighbor::{get_ddseqno, get_int_neighbors};
 use crate::packet::dd::FLAG_MS_BIT;
 use crate::packet::lsack::Lsack;
 use crate::packet::lsu::Lsu;
-use crate::{area, lsa, OPTION_E};
+use crate::{area, lsa, rtable, OPTION_E};
 use pnet::datalink::Channel::Ethernet;
 use pnet::datalink::{DataLinkReceiver, DataLinkSender};
 use pnet::packet::ethernet::EtherTypes;
@@ -139,7 +138,6 @@ pub async fn create_router_lsa(iaddr: net::Ipv4Addr) {
         let network_type = int.network_type;
         let mask = int.mask;
         let metric = int.output_cost;
-        let area_id = int.area_id;
         match istatus {
             super::status::Status::Down => {
                 continue;
@@ -279,9 +277,13 @@ pub async fn create_router_lsa(iaddr: net::Ipv4Addr) {
     area::lsdb::update_lsdb(iaddr, lsas).await;
 }
 
-pub async fn create_network_lsa(iaddr: net::Ipv4Addr) {}
+pub async fn create_network_lsa(iaddr: net::Ipv4Addr) {
+    unimplemented!()
+}
 
-pub async fn create_summary_lsa(iaddr: net::Ipv4Addr) {}
+pub async fn create_summary_lsa(iaddr: net::Ipv4Addr) {
+    unimplemented!()
+}
 
 pub async fn stop_send_lsack(iaddr: net::Ipv4Addr) {
     let g_handles = HANDLE_MAP.read().await;
@@ -540,9 +542,10 @@ pub async fn recv_packet(mut packet_rx: Box<dyn DataLinkReceiver>, iaddr: net::I
                         }
                     }
                     _ => {
-                        // crate::util::debug(
-                        //     "received non-ospf ip packet,forwarding or just received.",
-                        // );
+                        crate::util::debug(
+                            "received non-ospf ip packet,forwarding or just received.",
+                        );
+                        rtable::forward_packet(iaddr, ipv4_packet).await;
                         continue;
                     }
                 }
