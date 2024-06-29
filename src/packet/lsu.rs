@@ -9,7 +9,7 @@ use tokio::sync::RwLock;
 use crate::{
     interface::{self, NetworkType},
     lsa::{self, Lsa},
-    neighbor, OSPF_IP_PROTOCOL, OSPF_VERSION,
+    neighbor, ALL_SPF_ROUTERS, OSPF_IP_PROTOCOL, OSPF_VERSION,
 };
 
 pub const LSU_TYPE: u8 = 4;
@@ -23,11 +23,33 @@ pub struct Lsu {
 
 impl Lsu {
     pub fn try_from_be_bytes(payload: &[u8]) -> Option<Self> {
-        unimplemented!()
+        if payload.len() < super::OspfHeader::length() + 4 {
+            return None;
+        }
+        let header = super::OspfHeader::try_from_be_bytes(&payload[..super::OspfHeader::length()])?;
+        let lsa_count = u32::from_be_bytes([
+            payload[super::OspfHeader::length()],
+            payload[super::OspfHeader::length() + 1],
+            payload[super::OspfHeader::length() + 2],
+            payload[super::OspfHeader::length() + 3],
+        ]);
+        let mut lsa_list = Vec::new();
+        let mut offset = super::OspfHeader::length() + 4;
+        while offset + lsa::Header::length() <= payload.len() {
+            let lsa =
+                lsa::Lsa::try_from_be_bytes(&payload[offset..offset + lsa::Header::length()])?;
+            offset += lsa.length();
+            lsa_list.push(lsa);
+        }
+        Some(Self {
+            header,
+            lsa_count,
+            lsa_list,
+        })
     }
     pub async fn new(
         iaddr: net::Ipv4Addr,
-        naddr: net::Ipv4Addr,
+        _naddr: net::Ipv4Addr,
         lsas: Vec<Arc<RwLock<Lsa>>>,
     ) -> Self {
         let mut packet = Self::empty();
@@ -54,8 +76,12 @@ impl Lsu {
     }
     pub async fn received(lsu_packet: Lsu, naddr: net::Ipv4Addr, iaddr: net::Ipv4Addr) {
         crate::area::lsdb::update_lsdb(iaddr, lsu_packet.lsa_list.clone()).await;
-        let lsa_identifiers = lsu_packet.lsa_list.iter().map(|lsa| lsa.copy_header()).collect::<Vec<lsa::Header>>();
-        interface::handle::start_send_lsack(iaddr, naddr,Some( lsa_identifiers)).await;
+        let lsa_identifiers = lsu_packet
+            .lsa_list
+            .iter()
+            .map(|lsa| lsa.copy_header())
+            .collect::<Vec<lsa::Header>>();
+        interface::handle::start_send_lsack(iaddr, naddr, Some(lsa_identifiers)).await;
         neighbor::event::send(iaddr, naddr, neighbor::event::Event::LoadingDone).await;
     }
     pub fn empty() -> Self {
@@ -88,7 +114,7 @@ impl Lsu {
         }
     }
     pub async fn build_ipv4_packet<'a>(
-        lsu : Lsu,
+        lsu: Lsu,
         buffer: &'a mut Vec<u8>,
         iaddr: net::Ipv4Addr,
         naddr: net::Ipv4Addr,
@@ -106,16 +132,16 @@ impl Lsu {
         let network_type = interface::get_network_type(iaddr).await;
         match network_type {
             interface::NetworkType::Broadcast => {
-                packet.set_destination([224, 0, 0, 5].into());
+                packet.set_destination(ALL_SPF_ROUTERS);
             }
             interface::NetworkType::PointToPoint => {
-                packet.set_destination([224, 0, 0, 5].into());
+                packet.set_destination(naddr);
             }
             interface::NetworkType::NBMA => {
-                packet.set_destination([224, 0, 0, 5].into());
+                packet.set_destination(ALL_SPF_ROUTERS);
             }
             interface::NetworkType::PointToMultipoint => {
-                packet.set_destination([224, 0, 0, 5].into());
+                packet.set_destination(ALL_SPF_ROUTERS);
             }
             interface::NetworkType::VirtualLink => {
                 packet.set_destination(naddr);
@@ -135,5 +161,3 @@ impl Lsu {
         bytes
     }
 }
-
-

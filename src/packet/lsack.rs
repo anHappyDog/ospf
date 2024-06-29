@@ -23,7 +23,7 @@ pub struct Lsack {
 impl Lsack {
     pub async fn new(
         iaddr: net::Ipv4Addr,
-        naddr: net::Ipv4Addr,
+        _naddr: net::Ipv4Addr,
         headers: Option<Vec<crate::lsa::Header>>,
     ) -> Self {
         let mut lsack = Self::empty();

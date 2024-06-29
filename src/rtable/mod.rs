@@ -6,7 +6,7 @@ use std::sync::Arc;
 use pnet::packet::{ipv4, Packet};
 use tokio::sync::RwLock;
 
-use crate::interface::{self, handle::PACKET_SEND};
+use crate::interface::{self};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DestionationType {
@@ -63,25 +63,24 @@ impl RouteTable {
         mutable_packet.set_ttl(mutable_packet.get_ttl() - 1);
         mutable_packet.set_checksum(ipv4::checksum(&mutable_packet.to_immutable()));
         for entry in &self.entries {
-            if entry.destination_id == ipv4_packet.get_destination()
-                && entry.mask == ipv4_packet.get_destination()
-            {
-                crate::util::debug("forwarding:found route.");
-                let packet_sender = interface::trans::PACKET_SENDER.clone();
-                let imm_packet = mutable_packet.consume_to_immutable();
-                match packet_sender.send(bytes::Bytes::copy_from_slice(imm_packet.packet())) {
-                    Ok(_) => {
-                        crate::util::debug("forwarding:send packet success.");
-                    }
-                    Err(_) => {
-                        crate::util::error("forwarding:send packet failed.");
-                    }
+            // if entry.destination_id == ipv4_packet.get_destination()
+            //     && entry.mask == ipv4_packet.get_destination()
+            // {
+            crate::util::debug("forwarding:found route.");
+            let packet_sender = interface::trans::PACKET_SENDER.clone();
+            let imm_packet = mutable_packet.consume_to_immutable();
+            match packet_sender.send(bytes::Bytes::copy_from_slice(imm_packet.packet())) {
+                Ok(_) => {
+                    crate::util::debug("forwarding:send packet success.");
                 }
-                return;
+                Err(_) => {
+                    crate::util::error("forwarding:send packet failed.");
+                }
             }
+            return;
+            // }
         }
         crate::util::error("forwarding:route entry not found.");
-
     }
 }
 
@@ -89,8 +88,8 @@ lazy_static::lazy_static! {
     pub static ref ROUTE_TABLE : Arc<RwLock<RouteTable>> = Arc::new(RwLock::new(RouteTable::new()));
 }
 
-pub async fn update_route_table<'a>(ipv4_packet: ipv4::Ipv4Packet<'a>) {
-    unimplemented!()
+pub async fn update_route_table<'a>() {
+    graph::build_graph().await;
 }
 
 pub async fn forward_packet<'a>(iaddr: net::Ipv4Addr, ipv4_packet: ipv4::Ipv4Packet<'a>) {

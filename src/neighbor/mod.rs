@@ -13,9 +13,9 @@ pub mod event;
 pub mod handle;
 pub mod status;
 
-/// this key is the interface ipv4addr
-/// the inner ket is the neighbors **ipv4 addr**
-/// can get the id by the ospf packet 's inner function `get_neighbor_addr`
+// this key is the interface ipv4addr
+// the inner ket is the neighbors **ipv4 addr**
+// can get the id by the ospf packet 's inner function `get_neighbor_addr`
 lazy_static::lazy_static! {
     pub static ref NEIGHBOR_STATUS_MAP : Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<status::Status>>>>>>>> = Arc::new(RwLock::new(HashMap::new()));
     pub static ref NEIHGBOR_LSA_RETRANS_LIST_MAP : Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<Vec<area::lsdb::LsaIdentifer>>>>>>>>> = Arc::new(RwLock::new(HashMap::new()));
@@ -61,7 +61,7 @@ pub async fn get_int_neighbors(
 
 pub async fn get_naddr_by_id(
     iaddr: net::Ipv4Addr,
-    neighbor_id : net::Ipv4Addr
+    neighbor_id: net::Ipv4Addr,
 ) -> Option<net::Ipv4Addr> {
     let int_neighbors = INT_NEIGHBORS_MAP.read().await;
     let neighbors = int_neighbors.get(&iaddr).unwrap();
@@ -69,29 +69,24 @@ pub async fn get_naddr_by_id(
     for (naddr, neighbor) in locked_neighbors.iter() {
         let locked_neighbor = neighbor.read().await;
         if locked_neighbor.id == neighbor_id {
-            return Some(naddr.clone())
+            return Some(naddr.clone());
         }
     }
     return None;
 }
 
-
-pub async fn get_status_by_id(
-    iaddr: net::Ipv4Addr,
-    nid: net::Ipv4Addr,
-) -> Option<Status> {
+pub async fn get_status_by_id(iaddr: net::Ipv4Addr, nid: net::Ipv4Addr) -> Option<Status> {
     let int_neighbors = INT_NEIGHBORS_MAP.read().await;
     let neighbors = int_neighbors.get(&iaddr).unwrap();
     let locked_neighbors = neighbors.read().await;
     for (naddr, neighbor) in locked_neighbors.iter() {
         let locked_neighbor = neighbor.read().await;
         if locked_neighbor.id == nid {
-            return Some(get_status(iaddr, naddr.clone()).await)
+            return Some(get_status(iaddr, naddr.clone()).await);
         }
     }
     return None;
 }
-
 
 pub async fn update_neighbor(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr, packet: &Hello) {
     let g_neighbors = INT_NEIGHBORS_MAP.read().await;
@@ -395,6 +390,27 @@ pub async fn add(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr, neighbor: Neighbor)
 }
 
 pub async fn is_adjacent(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr) -> bool {
+    let network_type = interface::get_network_type(iaddr).await;
+    match network_type {
+        interface::NetworkType::PointToPoint
+        | interface::NetworkType::PointToMultipoint
+        | interface::NetworkType::VirtualLink => return true,
+        _ => {
+            let dr_id = interface::get_dr(iaddr).await;
+            let bdr_id = interface::get_bdr(iaddr).await;
+            let router_id = crate::ROUTER_ID.clone();
+            if dr_id == router_id || bdr_id == router_id {
+                return true;
+            }
+            let neighbors = get_int_neighbors(iaddr).await;
+            let locked_neighbors = neighbors.read().await;
+            let neighbor = locked_neighbors.get(&naddr).unwrap();
+            let locked_neighbor = neighbor.read().await;
+            if locked_neighbor.id == dr_id || locked_neighbor.id == bdr_id {
+                return true;
+            }
+        }
+    }
     false
 }
 

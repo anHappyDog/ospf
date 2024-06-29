@@ -146,7 +146,37 @@ impl DD {
         }
     }
     pub fn try_from_be_bytes(payload: &[u8]) -> Option<Self> {
-        unimplemented!()
+        if payload.len() < super::OspfHeader::length() + 8 {
+            return None;
+        }
+        let header = super::OspfHeader::try_from_be_bytes(&payload[..super::OspfHeader::length()])?;
+        let interface_mtu = u16::from_be_bytes([
+            payload[super::OspfHeader::length()],
+            payload[super::OspfHeader::length() + 1],
+        ]);
+        let options = payload[super::OspfHeader::length() + 2];
+        let flags = payload[super::OspfHeader::length() + 3];
+        let dd_sequence_number = u32::from_be_bytes([
+            payload[super::OspfHeader::length() + 4],
+            payload[super::OspfHeader::length() + 5],
+            payload[super::OspfHeader::length() + 6],
+            payload[super::OspfHeader::length() + 7],
+        ]);
+        let mut lsa_headers = Vec::new();
+        let mut offset = super::OspfHeader::length() + 8;
+        while offset + lsa::Header::length() <= payload.len() {
+            let lsa_header = lsa::Header::try_from_be_bytes(&payload[offset..])?;
+            lsa_headers.push(lsa_header);
+            offset += lsa::Header::length();
+        }
+        Some(Self {
+            header,
+            interface_mtu,
+            options,
+            flags,
+            dd_sequence_number,
+            lsa_headers,
+        })
     }
     pub fn length(&self) -> usize {
         super::OspfHeader::length() + 8 + self.lsa_headers.len() * lsa::Header::length()
@@ -358,7 +388,6 @@ impl DD {
                     neighbor::set_status(iaddr, naddr, status).await;
                 }
 
-                _ => {}
             }
         }
     }
