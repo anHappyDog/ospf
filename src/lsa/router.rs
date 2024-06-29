@@ -1,5 +1,5 @@
 
-use crate::{area::lsdb};
+use crate::area::lsdb;
 
 #[derive(Clone)]
 pub struct RouterLSA {

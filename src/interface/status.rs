@@ -69,9 +69,6 @@ pub async fn changed(iaddr: net::Ipv4Addr) -> () {
                     crate::util::debug("unloop event received.");
                     super::event::Event::unloop_ind(iaddr).await;
                 }
-                _ => {
-                    crate::util::error("invalid event received,ignored.");
-                }
             },
             Err(_) => {
                 continue;

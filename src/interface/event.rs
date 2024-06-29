@@ -245,6 +245,13 @@ pub async fn send_by_name(name: String, e: Event) {
     send(ipv4_addr, e).await;
 }
 
-pub async fn add_sender(ipv4_addr: net::Ipv4Addr) {}
+pub async fn add_sender(ipv4_addr: net::Ipv4Addr) {
+    let mut event_senders = EVENT_SENDERS.write().await;
+    let (event_tx, _) = broadcast::channel(32);
+    event_senders.insert(ipv4_addr, event_tx);
+}
 
-pub async fn remove_sender(ipv4_addr: net::Ipv4Addr) {}
+pub async fn remove_sender(ipv4_addr: net::Ipv4Addr) {
+    let mut event_senders = EVENT_SENDERS.write().await;
+    event_senders.remove(&ipv4_addr);
+}

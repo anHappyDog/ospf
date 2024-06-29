@@ -6,7 +6,7 @@ use crate::packet::lsack::Lsack;
 use crate::packet::lsu::Lsu;
 use crate::{area, lsa, rtable, OPTION_E};
 use pnet::datalink::Channel::Ethernet;
-use pnet::datalink::{DataLinkReceiver, DataLinkSender};
+use pnet::datalink::DataLinkReceiver;
 use pnet::packet::ethernet::EtherTypes;
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv4::Ipv4Packet;
@@ -257,16 +257,6 @@ pub async fn create_router_lsa(iaddr: net::Ipv4Addr) {
                     unimplemented!()
                 }
                 super::NetworkType::VirtualLink => {}
-                _ => {
-                    links.push(LinkState::new(
-                        iaddr.clone().into(),
-                        net::Ipv4Addr::new(255, 255, 255, 255).into(),
-                        LS_ID_STUB,
-                        0,
-                        None,
-                        metric as u16,
-                    ));
-                }
             },
         }
         // after process the interface, you should also process the
@@ -277,11 +267,11 @@ pub async fn create_router_lsa(iaddr: net::Ipv4Addr) {
     area::lsdb::update_lsdb(iaddr, lsas).await;
 }
 
-pub async fn create_network_lsa(iaddr: net::Ipv4Addr) {
+pub async fn create_network_lsa(_iaddr: net::Ipv4Addr) {
     unimplemented!()
 }
 
-pub async fn create_summary_lsa(iaddr: net::Ipv4Addr) {
+pub async fn create_summary_lsa(_iaddr: net::Ipv4Addr) {
     unimplemented!()
 }
 
@@ -377,7 +367,7 @@ impl Handle {
         let locked_raw_interface = raw_interface.read().await;
         let mut tr_config = Config::default();
         tr_config.channel_type = datalink::ChannelType::Layer3(EtherTypes::Ipv4.0);
-        let (packet_tx, packet_rx) = match datalink::channel(&locked_raw_interface, tr_config) {
+        let (_, packet_rx) = match datalink::channel(&locked_raw_interface, tr_config) {
             Ok(Ethernet(tx, rx)) => (tx, rx),
             _ => {
                 crate::util::error("create channel failed.");
@@ -402,7 +392,7 @@ impl Handle {
         }
     }
 
-    pub async fn when_interface_down(&mut self, iaddr: net::Ipv4Addr) {
+    pub async fn when_interface_down(&mut self, _iaddr: net::Ipv4Addr) {
         if let Some(send_packet) = self.send_packet.take() {
             send_packet.abort();
         }
@@ -504,7 +494,7 @@ pub async fn init(addrs: Vec<net::Ipv4Addr>) {
 /// the function is used to check the ipv4 packet is valid or not
 /// - packet : the ipv4 packet
 /// - addr : the interface's ipv4 address
-pub fn is_ipv4_packet_valid(packet: &ipv4::Ipv4Packet) -> bool {
+pub fn is_ipv4_packet_valid(_packet: &ipv4::Ipv4Packet) -> bool {
     true
 }
 
@@ -571,22 +561,6 @@ pub async fn start_dd_send(
     }
     let dd_send = tokio::spawn(dd_send(iaddr, naddr, n_master, lsa_headers));
     locked_in_handles.dd_send = Some(dd_send);
-}
-
-pub async fn wait_dd(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr) -> Option<DD> {
-    let g_trans = super::trans::TRANSMISSIONS.read().await;
-    let trans = g_trans.get(&iaddr).unwrap();
-    let mut inner_dd_rx = trans.inner_dd_tx.subscribe();
-    match inner_dd_rx.recv().await {
-        Ok(dd) => {
-            crate::util::debug("received dd packet,notified.");
-            return Some(dd);
-        }
-        Err(e) => {
-            crate::util::error(&format!("receive dd packet failed:{}", e));
-            return None;
-        }
-    }
 }
 
 pub async fn hello_timer(iaddr: net::Ipv4Addr, hello_interval: u16) -> () {

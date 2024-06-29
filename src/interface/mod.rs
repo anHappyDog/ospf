@@ -3,13 +3,11 @@ pub mod handle;
 pub mod status;
 pub mod trans;
 
-use std::{net};
+use std::net;
 
 use std::{collections::HashMap, net::Ipv4Addr, sync::Arc};
 
-use pnet::{
-    datalink::{self},
-};
+use pnet::datalink;
 use tokio::sync::RwLock;
 
 use crate::{area, neighbor, ROUTER_ID};
@@ -87,17 +85,14 @@ pub async fn get_bdr(iaddr: net::Ipv4Addr) -> net::Ipv4Addr {
 }
 
 pub async fn is_abr() -> bool {
-// TODO
+    // TODO
     false
 }
 
 pub async fn is_asbr() -> bool {
-// TODO
+    // TODO
     false
 }
-
-
-
 
 pub async fn get_network_type(iaddr: net::Ipv4Addr) -> NetworkType {
     let imap = INTERFACE_MAP.read().await;
@@ -361,4 +356,4 @@ pub async fn list() {
     }
 }
 
-pub async fn display(name: String) {}
+pub async fn display(_name: String) {}

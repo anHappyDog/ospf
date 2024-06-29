@@ -14,7 +14,7 @@ pub const SUMMARY_LSA_TYPE_3: u8 = 3;
 pub const SUMMARY_LSA_TYPE_4: u8 = 4;
 
 impl SummaryLSA {
-    pub async fn new(iaddr : net::Ipv4Addr) -> Self {
+    pub async fn new(_iaddr : net::Ipv4Addr) -> Self {
         unimplemented!()
     }
     pub fn build_identifier(&self) -> lsdb::LsaIdentifer {

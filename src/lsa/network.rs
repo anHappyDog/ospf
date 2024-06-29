@@ -12,7 +12,7 @@ pub struct NetworkLSA {
 pub const NETWORK_LSA_TYPE: u8 = 2;
 
 impl NetworkLSA {
-    pub async fn new(iaddr: net::Ipv4Addr) -> Self {
+    pub async fn new(_iaddr: net::Ipv4Addr) -> Self {
         unimplemented!()
     }
     pub fn build_identifier(&self) -> lsdb::LsaIdentifer {
