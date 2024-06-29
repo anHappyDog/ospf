@@ -10,6 +10,11 @@ pub struct RouterLSA {
     pub link_states: Vec<LinkState>,
 }
 
+pub const LS_ID_POINT_TO_POINT: u32 = 1;
+pub const LS_ID_TRANSIT: u32 = 2;
+pub const LS_ID_STUB: u32 = 3;
+pub const LS_ID_VIRTUAL_LINK: u32 = 4;
+
 pub const ROUTER_LSA_TYPE: u8 = 1;
 #[derive(Clone)]
 pub struct LinkState {
@@ -22,6 +27,23 @@ pub struct LinkState {
 }
 
 impl LinkState {
+    pub fn new(
+        link_id: u32,
+        link_data: u32,
+        ls_type: u8,
+        tos_count: u8,
+        tos: Option<Vec<u32>>,
+        metric : u16,
+    ) -> Self {
+        Self {
+            link_id,
+            link_data,
+            ls_type,
+            tos_count,
+            metric,
+            tos: tos.unwrap_or(Vec::new()),
+        }
+    }
     pub fn to_be_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&self.link_id.to_be_bytes());
@@ -81,11 +103,7 @@ impl LinkState {
 }
 
 impl RouterLSA {
-    pub async fn new(iaddr: net::Ipv4Addr, links: Vec<LinkState>) -> Self {
-        let interface = interface::INTERFACE_MAP.read().await;
-        let locked_interface = interface.get(&iaddr).unwrap();
-        let options = locked_interface.options;
-        drop(interface);
+    pub async fn new(links: Vec<LinkState>, options: u8) -> Self {
         let lsa_type = ROUTER_LSA_TYPE;
         let link_state_id = crate::ROUTER_ID.clone();
         let advertising_router = crate::ROUTER_ID.clone();

@@ -3,7 +3,7 @@ pub mod handle;
 pub mod status;
 pub mod trans;
 
-use std::net;
+use std::{clone, net};
 
 use std::{collections::HashMap, net::Ipv4Addr, sync::Arc};
 
@@ -87,8 +87,29 @@ pub async fn get_bdr(iaddr: net::Ipv4Addr) -> net::Ipv4Addr {
 }
 
 pub async fn is_abr() -> bool {
+// TODO
     false
 }
+
+pub async fn is_asbr() -> bool {
+// TODO
+    false
+}
+
+pub async fn get_dr_neighbor_status(iaddr: net::Ipv4Addr) -> (bool,Option<neighbor::status::Status>) {
+    let dr_id = get_dr(iaddr).await;
+    if let net::Ipv4Addr::new(0, 0, 0, 0) = dr_id {
+        // no dr yet.
+        return (false,None);
+    }
+    if crate::ROUTER_ID.clone() == dr_id {
+        return (true,None);
+    }
+    let neighbor_status = neighbor::get_status_by_id(iaddr, dr_id).await;
+    (true,Some(neighbor_status))
+}
+
+
 
 pub async fn get_network_type(iaddr: net::Ipv4Addr) -> NetworkType {
     let imap = INTERFACE_MAP.read().await;

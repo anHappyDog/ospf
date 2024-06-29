@@ -1,3 +1,5 @@
+use crate::lsa::router::{LinkState, RouterLSA, LS_ID_STUB};
+use crate::lsa::summary;
 use crate::neighbor::get_ddseqno;
 use crate::packet::dd::FLAG_MS_BIT;
 use crate::packet::lsack::Lsack;
@@ -16,13 +18,14 @@ use pnet::{
     },
     transport,
 };
+use std::ops::BitAnd;
 use std::{collections::HashMap, net, sync::Arc};
 use tokio::task::JoinHandle;
 use tokio::{sync::RwLock, time};
 
 use crate::{neighbor, packet::dd::DD, IPV4_PACKET_MTU, OSPF_IP_PROTOCOL};
 
-use super::status;
+use super::{status, INTERFACE_MAP};
 
 // ONLY USE IN THE INNER INTERFACE
 // KEY IS THE INTERFACE 'S IPV4 ADDR
@@ -120,7 +123,112 @@ pub async fn start_send_lsack(
     locked_int_handles.lsack_send = Some(lsack_send);
 }
 
-pub async fn create_router_lsa(iaddr: net::Ipv4Addr) {}
+// the should be called when the interface's status is changed
+pub async fn create_router_lsa() {
+    let imap = INTERFACE_MAP.read().await;
+    let mut links = Vec::new();
+    for (iaddr, int) in *imap {
+        // you should judge whether the interface's network
+        // belongs to the area.
+        let istatus = super::get_status(iaddr).await;
+        let network_type = int.network_type;
+        let mask = int.mask;
+        let metric = int.output_cost;
+        let area_id = int.area_id;
+        match istatus {
+            super::status::Status::Down => {
+                continue;
+            }
+            super::status::Status::Loopback => match network_type {
+                super::NetworkType::PointToPoint => {
+                    continue;
+                }
+                _ => {
+                    links.push(LinkState::new(
+                        iaddr,
+                        net::Ipv4Addr::new(255, 255, 255, 255),
+                        LS_ID_STUB,
+                        0,
+                        None,
+                        0,
+                    ));
+                }
+            },
+            _ => match network_type {
+                super::NetworkType::PointToPoint => {
+                    unimplemented!()
+                }
+                super::NetworkType::Broadcast | super::NetworkType::NBMA => {
+                    match istatus {
+                        super::status::Status::Waiting => {
+                            links.push(LinkState::new(
+                                iaddr.bitand(mask), // get the network's ip address
+                                mask,
+                                LS_ID_STUB,
+                                0,
+                                None,
+                                metric as u16,
+                            ));
+                        }
+                        _ => {
+                            let (is_dr_exists, nstatus) =
+                                super::get_dr_neighbor_status(iaddr).await;
+                            if is_dr_exists {
+                                match nstatus {
+                                    some(nstatus) => {
+                                        if let neighbor::status::Status::Full = nstatus {
+                                            links.push(LinkState::new(
+
+                                            ));
+                                        } else {
+                                            links.push(LinkState::new(
+                                                iaddr.bitand(mask), // get the network's ip address
+                                                mask,
+                                                LS_ID_STUB,
+                                                0,
+                                                None,
+                                                metric as u16,
+                                            ));
+                                        }
+                                    },
+                                    None => {
+                                        // it means the router self is the DR
+                                        // check all the neighbors whether exists one neighbor is exstart or higher
+
+                                    }
+                                }
+                            } else {
+                                links.push(LinkState::new(
+                                    iaddr.bitand(mask), // get the network's ip address
+                                    mask,
+                                    LS_ID_STUB,
+                                    0,
+                                    None,
+                                    metric as u16,
+                                ));
+                            }
+                        }
+                    }
+                }
+                super::NetworkType::PointToMultipoint => {
+                    unimplemented!()
+                }
+                super::NetworkType::VirtualLink => {}
+                _ => {
+                    links.push(LinkState::new(
+                        iaddr,
+                        net::Ipv4Addr::new(255, 255, 255, 255),
+                        LS_ID_STUB,
+                        0,
+                        None,
+                    ));
+                }
+            },
+        }
+        // after process the interface, you should also process the
+        // host that connected to  the area, but here we just ignore it.
+    }
+}
 
 pub async fn create_network_lsa(iaddr: net::Ipv4Addr) {}
 

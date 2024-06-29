@@ -51,6 +51,30 @@ impl Neighbor {
     }
 }
 
+pub async fn get_int_neighbors(
+    iaddr: net::Ipv4Addr,
+) -> Arc<RwLock<HashMap<net::Ipv4Addr, Arc<RwLock<Neighbor>>>>> {
+    let int_neighbors = INT_NEIGHBORS_MAP.read().await;
+    int_neighbors.get(&iaddr).unwrap().clone()
+}
+
+pub async fn get_status_by_id(
+    iaddr: net::Ipv4Addr,
+    nid: net::Ipv4Addr,
+) -> Option<Arc<RwLock<Neighbor>>> {
+    let int_neighbors = INT_NEIGHBORS_MAP.read().await;
+    let neighbors = int_neighbors.get(&iaddr).unwrap();
+    let locked_neighbors = neighbors.read().await;
+    for (naddr, neighbor) in locked_neighbors.iter() {
+        let locked_neighbor = neighbor.read().await;
+        if locked_neighbor.id == nid {
+            return Some(neighbor.clone());
+        }
+    }
+    return None;
+}
+
+
 pub async fn update_neighbor(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr, packet: &Hello) {
     let g_neighbors = INT_NEIGHBORS_MAP.read().await;
     let int_neighbors = g_neighbors.get(&iaddr).unwrap();
@@ -191,8 +215,7 @@ pub async fn update_lsr_list(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr, dd: DD)
     }
 }
 
-
-// when a lsa header is in a lsack packet, then use this to 
+// when a lsa header is in a lsack packet, then use this to
 /// remove the lsa identifier from the neighbor's retrans list.
 pub async fn ack_lsa(
     iaddr: net::Ipv4Addr,
@@ -206,7 +229,6 @@ pub async fn ack_lsa(
     let mut locked_n_retrans_list = n_retrans_list.write().await;
     locked_n_retrans_list.retain(|x| x != &lsa_identifer);
 }
-
 
 pub async fn get_trans_list(
     iaddr: net::Ipv4Addr,
