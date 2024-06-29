@@ -1,7 +1,8 @@
 use std::{collections::HashMap, net, sync::Arc};
 
+use handle::HANDLE_MAP;
 use status::Status;
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
 
 use crate::{
     area::{self, lsdb::LsaIdentifer},
@@ -387,6 +388,9 @@ pub async fn add(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr, neighbor: Neighbor)
     let n_handle_list = handle_list.get(&iaddr).unwrap();
     let mut locked_handle_list = n_handle_list.write().await;
     locked_handle_list.insert(naddr, handle::Handle::new(naddr, iaddr));
+
+
+    event::add_sender(iaddr, naddr).await;
 }
 
 pub async fn is_adjacent(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr) -> bool {
@@ -421,7 +425,8 @@ pub async fn init(iaddrs: Vec<net::Ipv4Addr>) {
     let mut int_neighbors = INT_NEIGHBORS_MAP.write().await;
     let mut lsr_list = NEIGHBOR_LSR_LIST_MAP.write().await;
     let mut last_dd_map = NEIGHBOR_LAST_DD_MAP.write().await;
-
+    let mut handle_map = HANDLE_MAP.write().await; 
+    let mut event_senders = event::EVENT_SENDERS.write().await;
     for iaddr in iaddrs {
         int_neighbors.insert(iaddr, Arc::new(RwLock::new(HashMap::new())));
 
@@ -434,5 +439,9 @@ pub async fn init(iaddrs: Vec<net::Ipv4Addr>) {
         lsr_list.insert(iaddr, Arc::new(RwLock::new(HashMap::new())));
 
         last_dd_map.insert(iaddr, Arc::new(RwLock::new(HashMap::new())));
+        
+        handle_map.insert(iaddr, Arc::new(RwLock::new(HashMap::new())));
+    
+        event_senders.insert(iaddr, Arc::new(RwLock::new(HashMap::new())));
     }
 }

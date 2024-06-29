@@ -580,6 +580,7 @@ pub async fn hello_timer(iaddr: net::Ipv4Addr, hello_interval: u16) -> () {
                 }
             }
         };
+        crate::util::log(&format!("{:#?}",hello_packet));
         loop {
             match inner_packet_tx.send(bytes::Bytes::from(hello_ipv4_packet.packet().to_vec())) {
                 Ok(_) => {

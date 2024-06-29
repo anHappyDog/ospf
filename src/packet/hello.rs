@@ -145,6 +145,8 @@ impl Hello {
             )
             .await;
         }
+        // neighbor::event::send(iaddr, naddr, neighbor::event::Event::HelloReceived).await;
+        neighbor::event::Event::hello_received(iaddr, naddr).await;
         if packet.neighbors.contains(&u32::from(iaddr.clone())) {
             neighbor::event::Event::two_way_received(naddr, iaddr).await;
             neighbor::update_neighbor(iaddr, naddr, &packet).await;
@@ -161,13 +163,19 @@ impl Hello {
             None => return None,
         };
         let mut neighbors = Vec::new();
-        for i in 40..payload.len() {
+        let mut i = 44;
+        loop {
+            if i >= payload.len() {
+                break;
+            }
             neighbors.push(u32::from_be_bytes([
                 payload[i],
                 payload[i + 1],
                 payload[i + 2],
                 payload[i + 3],
             ]));
+            i += 4;
+
         }
         Some(Self {
             header: ospf_header,

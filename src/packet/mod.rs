@@ -200,6 +200,7 @@ impl OspfPacket {
         match ipv4_packet.get_next_level_protocol() {
             ip::IpNextHeaderProtocol(OSPF_IP_PROTOCOL) => {
                 let payload = ipv4_packet.payload();
+                crate::util::debug(&format!("{:#?},packet length is {}",ipv4_packet,ipv4_packet.payload().len()));
                 match crate::packet::OspfHeader::try_from_be_bytes(payload) {
                     Some(ospf_header) => match ospf_header.packet_type {
                         HELLO_TYPE => {
@@ -208,6 +209,7 @@ impl OspfPacket {
                             match hello_packet {
                                 Some(hello_packet) => {
                                     crate::util::debug("ospf hello packet received.");
+                                    crate::util::debug(&format!("{:#?}",hello_packet));
                                     Ok(crate::packet::OspfPacket::Hello(hello_packet))
                                 }
                                 None => Err("invalid hello packet,ignored."),

@@ -10,7 +10,7 @@ use std::{collections::HashMap, net::Ipv4Addr, sync::Arc};
 use pnet::datalink;
 use tokio::sync::RwLock;
 
-use crate::{area, neighbor, ROUTER_ID};
+use crate::{area, neighbor, OPTION_E, ROUTER_ID};
 
 lazy_static::lazy_static! {
     pub static ref INTERFACE_STATUS_MAP: Arc<RwLock<HashMap<net::Ipv4Addr,Arc<RwLock<status::Status>>>>> = Arc::new(RwLock::new(HashMap::new()));
@@ -33,7 +33,7 @@ pub const DEFAULT_ROUTER_DEAD_INTERVAL: u32 = 40;
 pub const DEFAULT_AUTH_TYPE: u16 = 0;
 pub const DEFAULT_AUTH_KEY: u64 = 0;
 pub const DEFAULT_AREA_ID: u32 = 0;
-pub const DEFAULT_OPTIONS: u8 = 0;
+pub const DEFAULT_OPTIONS: u8 = OPTION_E;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum NetworkType {
