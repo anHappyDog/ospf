@@ -61,7 +61,7 @@ impl Event {
         }
         let new_status = select_dr_bdr(iaddr).await;
         super::set_status(iaddr, new_status).await;
-        start_dd_send(iaddr, naddr, true, None).await;
+        start_dd_send(iaddr, naddr, false,true,true, None).await;
     }
     pub async fn loop_ind(iaddr: net::Ipv4Addr) {
         let g_handlers = super::handle::HANDLE_MAP.read().await;

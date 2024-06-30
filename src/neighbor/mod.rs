@@ -1,6 +1,7 @@
 use std::{collections::HashMap, net, sync::Arc};
 
 use handle::HANDLE_MAP;
+use pnet::{datalink, util::MacAddr};
 use status::Status;
 use tokio::sync::{broadcast, RwLock};
 
@@ -36,10 +37,16 @@ pub struct Neighbor {
     pub options: u8,
     pub dr: net::Ipv4Addr,
     pub bdr: net::Ipv4Addr,
+    pub mac: datalink::MacAddr
 }
 
 impl Neighbor {
-    pub fn from_hello_packet(hello: &Hello, naddr: net::Ipv4Addr, nid: net::Ipv4Addr) -> Self {
+    pub fn from_hello_packet(
+        hello: &Hello,
+        naddr: net::Ipv4Addr,
+        nid: net::Ipv4Addr,
+        mac_addr: MacAddr,
+    ) -> Self {
         Self {
             master: false,
             dd_seq: 0,
@@ -49,8 +56,33 @@ impl Neighbor {
             options: hello.options,
             dr: hello.designated_router.into(),
             bdr: hello.backup_designated_router.into(),
+            mac: mac_addr,
         }
     }
+}
+
+pub async fn set_last_send_dd(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr, dd: DD) {
+    let last_dd_map = NEIGHBOR_LAST_DD_MAP.read().await;
+    let last_dd = last_dd_map.get(&iaddr).unwrap();
+    let mut locked_last_dd = last_dd.write().await;
+    locked_last_dd.insert(naddr, dd);
+}
+
+pub async fn get_last_send_dd(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr) -> DD {
+    let last_dd_map = NEIGHBOR_LAST_DD_MAP.read().await;
+    let last_dd = last_dd_map.get(&iaddr).unwrap();
+    let locked_last_dd = last_dd.read().await;
+    locked_last_dd.get(&naddr).unwrap().clone()
+}
+
+
+pub async fn get_mac(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr) -> datalink::MacAddr {
+    let int_neighbors = INT_NEIGHBORS_MAP.read().await;
+    let neighbors = int_neighbors.get(&iaddr).unwrap();
+    let locked_neighbors = neighbors.read().await;
+    let neighbor = locked_neighbors.get(&naddr).unwrap();
+    let locked_neighbor = neighbor.read().await;
+    locked_neighbor.mac
 }
 
 pub async fn get_int_neighbors(
@@ -98,56 +130,63 @@ pub async fn update_neighbor(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr, packet:
 
     if packet.router_priority != locked_neighbor.priority {
         locked_neighbor.priority = packet.router_priority;
-        tokio::spawn(interface::event::send(
-            iaddr,
-            interface::event::Event::NeighborChange(naddr),
-        ));
+        // tokio::spawn(interface::event::send(
+        //     iaddr,
+        //     interface::event::Event::NeighborChange(naddr),
+        // ));
+        interface::event::Event::neighbor_change(iaddr, naddr).await;
     }
     if packet.designated_router == locked_neighbor.id.into()
         && packet.backup_designated_router == 0
         && interface::get_status(iaddr).await == interface::status::Status::Waiting
     {
-        tokio::spawn(interface::event::send(
-            iaddr,
-            interface::event::Event::BackupSeen,
-        ));
+        // tokio::spawn(interface::event::send(
+        //     iaddr,
+        //     interface::event::Event::BackupSeen,
+        // ));
+        interface::event::Event::backup_seen(iaddr).await;
     } else if packet.designated_router == locked_neighbor.id.into()
         && packet.designated_router != locked_neighbor.id.into()
     {
-        tokio::spawn(interface::event::send(
-            iaddr,
-            interface::event::Event::NeighborChange(naddr),
-        ));
+        // tokio::spawn(interface::event::send(
+        //     iaddr,
+        //     interface::event::Event::NeighborChange(naddr),
+        // ));
+        interface::event::Event::neighbor_change(iaddr, naddr).await;
     } else if packet.designated_router != locked_neighbor.id.into()
         && packet.designated_router == locked_neighbor.id.into()
     {
-        tokio::spawn(interface::event::send(
-            iaddr,
-            interface::event::Event::NeighborChange(naddr),
-        ));
+        // tokio::spawn(interface::event::send(
+        //     iaddr,
+        //     interface::event::Event::NeighborChange(naddr),
+        // ));
+        interface::event::Event::neighbor_change(iaddr, naddr).await;
     }
 
     if packet.backup_designated_router == locked_neighbor.ipv4_addr.into()
         && interface::get_status(iaddr).await == interface::status::Status::Waiting
     {
-        tokio::spawn(interface::event::send(
-            iaddr,
-            interface::event::Event::BackupSeen,
-        ));
+        // tokio::spawn(interface::event::send(
+        //     iaddr,
+        //     interface::event::Event::BackupSeen,
+        // ));
+        interface::event::Event::backup_seen(iaddr).await;
     } else if packet.backup_designated_router == locked_neighbor.ipv4_addr.into()
         && locked_neighbor.bdr != locked_neighbor.ipv4_addr
     {
-        tokio::spawn(interface::event::send(
-            iaddr,
-            interface::event::Event::NeighborChange(naddr),
-        ));
+        // tokio::spawn(interface::event::send(
+        //     iaddr,
+        //     interface::event::Event::NeighborChange(naddr),
+        // ));
+        interface::event::Event::neighbor_change(iaddr, naddr).await;
     } else if packet.backup_designated_router != locked_neighbor.ipv4_addr.into()
         && locked_neighbor.bdr == locked_neighbor.ipv4_addr
     {
-        tokio::spawn(interface::event::send(
-            iaddr,
-            interface::event::Event::NeighborChange(naddr),
-        ));
+        // tokio::spawn(interface::event::send(
+        //     iaddr,
+        //     interface::event::Event::NeighborChange(naddr),
+        // ));
+        interface::event::Event::neighbor_change(iaddr, naddr).await;
     }
 
     // now update the neighbor
@@ -389,7 +428,6 @@ pub async fn add(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr, neighbor: Neighbor)
     let mut locked_handle_list = n_handle_list.write().await;
     locked_handle_list.insert(naddr, handle::Handle::new(naddr, iaddr));
 
-
     event::add_sender(iaddr, naddr).await;
 }
 
@@ -402,15 +440,10 @@ pub async fn is_adjacent(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr) -> bool {
         _ => {
             let dr_id = interface::get_dr(iaddr).await;
             let bdr_id = interface::get_bdr(iaddr).await;
-            let router_id = crate::ROUTER_ID.clone();
-            if dr_id == router_id || bdr_id == router_id {
+            if dr_id == iaddr || bdr_id == iaddr {
                 return true;
             }
-            let neighbors = get_int_neighbors(iaddr).await;
-            let locked_neighbors = neighbors.read().await;
-            let neighbor = locked_neighbors.get(&naddr).unwrap();
-            let locked_neighbor = neighbor.read().await;
-            if locked_neighbor.id == dr_id || locked_neighbor.id == bdr_id {
+            if naddr == dr_id || naddr == bdr_id {
                 return true;
             }
         }
@@ -425,7 +458,7 @@ pub async fn init(iaddrs: Vec<net::Ipv4Addr>) {
     let mut int_neighbors = INT_NEIGHBORS_MAP.write().await;
     let mut lsr_list = NEIGHBOR_LSR_LIST_MAP.write().await;
     let mut last_dd_map = NEIGHBOR_LAST_DD_MAP.write().await;
-    let mut handle_map = HANDLE_MAP.write().await; 
+    let mut handle_map = HANDLE_MAP.write().await;
     let mut event_senders = event::EVENT_SENDERS.write().await;
     for iaddr in iaddrs {
         int_neighbors.insert(iaddr, Arc::new(RwLock::new(HashMap::new())));
@@ -439,9 +472,9 @@ pub async fn init(iaddrs: Vec<net::Ipv4Addr>) {
         lsr_list.insert(iaddr, Arc::new(RwLock::new(HashMap::new())));
 
         last_dd_map.insert(iaddr, Arc::new(RwLock::new(HashMap::new())));
-        
+
         handle_map.insert(iaddr, Arc::new(RwLock::new(HashMap::new())));
-    
+
         event_senders.insert(iaddr, Arc::new(RwLock::new(HashMap::new())));
     }
 }

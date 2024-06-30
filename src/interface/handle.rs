@@ -1,13 +1,13 @@
 use crate::lsa::router::{LinkState, RouterLSA, LS_ID_STUB, LS_ID_TRANSIT};
 use crate::lsa::Lsa;
-use crate::neighbor::{get_ddseqno, get_int_neighbors};
-use crate::packet::dd::FLAG_MS_BIT;
+use crate::neighbor::{get_ddseqno, get_int_neighbors, save_last_dd};
+use crate::packet::dd::{FLAG_I_BIT, FLAG_MS_BIT, FLAG_M_BIT};
 use crate::packet::lsack::Lsack;
 use crate::packet::lsu::Lsu;
 use crate::{area, lsa, rtable, OPTION_E};
 use pnet::datalink::Channel::Ethernet;
-use pnet::datalink::DataLinkReceiver;
-use pnet::packet::ethernet::EtherTypes;
+use pnet::datalink::{DataLinkReceiver, DataLinkSender};
+use pnet::packet::ethernet::{self, EtherTypes};
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv4::Ipv4Packet;
 use pnet::{
@@ -18,6 +18,7 @@ use pnet::{
     },
     transport,
 };
+use std::default;
 use std::ops::BitAnd;
 use std::{collections::HashMap, net, sync::Arc};
 use tokio::task::JoinHandle;
@@ -79,9 +80,10 @@ pub async fn stop_send_lsu(iaddr: net::Ipv4Addr) {
 pub async fn send_lsu(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr) {
     let rxmt_interval = super::get_rxmt_interval(iaddr).await;
     let interval = time::Duration::from_secs(rxmt_interval as u64);
-    let packet_sender = super::trans::PACKET_SENDER.clone();
+    let packet_inner_tx = super::trans::get_packet_inner_tx(iaddr).await;
     let retrans_list = neighbor::get_trans_list(iaddr, naddr).await;
     let mut buffer: Vec<u8> = vec![0; crate::IPV4_PACKET_MTU];
+    let mut bf: Vec<u8> = vec![0; IPV4_PACKET_MTU + 100];
     loop {
         let locked_retrans_list = retrans_list.read().await;
         let lsas = match area::lsdb::fetch_lsas(iaddr, locked_retrans_list.clone()).await {
@@ -95,7 +97,14 @@ pub async fn send_lsu(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr) {
         let ip_packet = Lsu::build_ipv4_packet(lsu_packet.clone(), &mut buffer, iaddr, naddr)
             .await
             .unwrap();
-        match packet_sender.send(bytes::Bytes::from(ip_packet.packet().to_vec())) {
+        let ether_packet = crate::packet::build_ether_packet(
+            &mut bf,
+            ip_packet,
+            super::get_mac(iaddr).await,
+            neighbor::get_mac(iaddr, naddr).await,
+        )
+        .await;
+        match packet_inner_tx.send(bytes::Bytes::from(ether_packet.packet().to_vec())) {
             Ok(_) => {
                 crate::util::debug("send lsu packet success.");
             }
@@ -296,8 +305,13 @@ pub async fn send_lsack(
         .build_ipv4_packet(&mut buffer, iaddr, naddr)
         .await
         .unwrap();
-    let packet_sender = super::trans::PACKET_SENDER.clone();
-    match packet_sender.send(bytes::Bytes::from(ip_packet.packet().to_vec())) {
+    let mut bf = vec![0; IPV4_PACKET_MTU + 100];
+    let packet_inner_tx = super::trans::get_packet_inner_tx(iaddr).await;
+    let source_mac = super::get_mac(iaddr).await;
+    let neighbor_mac = neighbor::get_mac(iaddr, naddr).await;
+    let ether_packet =
+        crate::packet::build_ether_packet(&mut bf, ip_packet, source_mac, neighbor_mac).await;
+    match packet_inner_tx.send(bytes::Bytes::from(ether_packet.packet().to_vec())) {
         Ok(_) => {
             crate::util::debug("send lsack packet success.");
         }
@@ -315,7 +329,10 @@ pub async fn send_lsr(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr) {
     let lsr_list = lsr_list.read().await;
     let rxmt_interval = super::get_rxmt_interval(iaddr).await;
     let interval = time::Duration::from_secs(rxmt_interval as u64);
-    let packet_sender = super::trans::PACKET_SENDER.clone();
+    let packet_inner_tx = super::trans::get_packet_inner_tx(iaddr).await;
+    let mut bf: Vec<u8> = vec![0; IPV4_PACKET_MTU + 100];
+    let neighbor_mac = neighbor::get_mac(iaddr, naddr).await;
+    let source_mac = super::get_mac(iaddr).await;
     loop {
         let lsr_packet = crate::packet::lsr::Lsr::new(iaddr, lsr_list.clone()).await;
         let mut buffer = vec![0; IPV4_PACKET_MTU];
@@ -323,7 +340,10 @@ pub async fn send_lsr(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr) {
             .build_ipv4_packet(&mut buffer, iaddr, naddr)
             .await
             .unwrap();
-        match packet_sender.send(bytes::Bytes::from(ippacket.packet().to_vec())) {
+        let ether_packet =
+            crate::packet::build_ether_packet(&mut bf, ippacket, source_mac, neighbor_mac).await;
+
+        match packet_inner_tx.send(bytes::Bytes::from(ether_packet.packet().to_vec())) {
             Ok(_) => {
                 crate::util::debug("send lsr packet success.");
             }
@@ -365,22 +385,21 @@ impl Handle {
     pub async fn when_interface_up(&mut self, iaddr: net::Ipv4Addr) -> super::status::Status {
         let raw_interface = super::get_raw_interface(iaddr).await;
         let locked_raw_interface = raw_interface.read().await;
-        let mut tr_config = Config::default();
-        tr_config.channel_type = datalink::ChannelType::Layer3(EtherTypes::Ipv4.0);
-        let (_, packet_rx) = match datalink::channel(&locked_raw_interface, tr_config) {
-            Ok(Ethernet(tx, rx)) => (tx, rx),
-            _ => {
-                crate::util::error("create channel failed.");
-                return status::Status::Down;
-            }
-        };
-
+        let (packet_tx, packet_rx) =
+            match datalink::channel(&locked_raw_interface, default::Default::default()) {
+                Ok(Ethernet(tx, rx)) => (tx, rx),
+                _ => {
+                    crate::util::error("create channel failed.");
+                    return status::Status::Down;
+                }
+            };
         let interface_map = super::INTERFACE_MAP.read().await;
         let interface = interface_map.get(&iaddr).unwrap();
         let hello_interval = interface.hello_interval;
         let network_type = interface.network_type;
         let router_dead_interval = interface.router_dead_interval;
         drop(interface_map);
+        self.send_packet = Some(tokio::spawn(send_packet(packet_tx, iaddr)));
         self.recv_packet = Some(tokio::spawn(recv_packet(packet_rx, iaddr)));
         self.hello_timer = Some(tokio::spawn(hello_timer(iaddr, hello_interval)));
         match network_type {
@@ -420,31 +439,32 @@ impl Handle {
     }
 }
 
-pub async fn global_packet_send() {
-    let (mut packet_tx, _) = transport::transport_channel(
-        1024,
-        transport::TransportChannelType::Layer3(IpNextHeaderProtocols::Ipv4),
-    )
-    .expect("create packet sender failed.");
-    let mut packet_inner_rx = super::trans::PACKET_SENDER.clone().subscribe();
+pub async fn send_packet(mut packet_tx: Box<dyn DataLinkSender>, iaddr: net::Ipv4Addr) {
+    let mut packet_inner_rx = super::trans::get_packet_inner_rx(iaddr).await;
     loop {
         match packet_inner_rx.recv().await {
-            Ok(bytes) => match Ipv4Packet::new(&bytes) {
-                Some(packet) => {
-                    let destination = packet.get_destination();
-                    match packet_tx.send_to(packet, destination.into()) {
+            Ok(bytes) => {
+                let ether_packet = match pnet::packet::ethernet::EthernetPacket::new(&bytes) {
+                    Some(p) => p,
+                    None => {
+                        crate::util::error("receive the ethernet packet failed.");
+                        continue;
+                    }
+                };
+                match packet_tx.send_to(ether_packet.packet(), None) {
+                    Some(res) => match res {
                         Ok(_) => {
-                            crate::util::debug("send ip packet success.");
+                            crate::util::debug("send packet success.");
                         }
-                        _ => {
-                            crate::util::debug("send ip packet failed.");
+                        Err(e) => {
+                            crate::util::error(&format!("send packet failed,{}", e));
                         }
+                    },
+                    None => {
+                        crate::util::error("send packet failed.");
                     }
                 }
-                None => {
-                    crate::util::error("received non-ip inner packet.");
-                }
-            },
+            }
             Err(e) => {
                 crate::util::error(&format!("receive inner packet failed,{}", e));
                 continue;
@@ -482,8 +502,6 @@ pub async fn add(addr: net::Ipv4Addr, handle: Handle) {
 }
 
 pub async fn init(addrs: Vec<net::Ipv4Addr>) {
-    let mut g_packet_send = PACKET_SEND.write().await;
-    *g_packet_send = Some(tokio::spawn(global_packet_send()));
     for addr in addrs {
         let handle = Handle::new(addr);
         add(addr, handle).await;
@@ -503,7 +521,16 @@ pub async fn recv_packet(mut packet_rx: Box<dyn DataLinkReceiver>, iaddr: net::I
     loop {
         match packet_rx.next() {
             Ok(packet) => {
-                let ipv4_packet = match ipv4::Ipv4Packet::new(&packet) {
+                let ether_packet = match ethernet::EthernetPacket::new(&packet) {
+                    Some(p) => p,
+                    None => {
+                        crate::util::error("receive the ethernet packet failed.");
+                        continue;
+                    }
+                };
+                let ether_payload = ether_packet.payload();
+                let src_mac = ether_packet.get_source();
+                let ipv4_packet = match ipv4::Ipv4Packet::new(&ether_payload) {
                     Some(p) => p,
                     None => {
                         crate::util::error("receive the  packet failed.");
@@ -523,6 +550,7 @@ pub async fn recv_packet(mut packet_rx: Box<dyn DataLinkReceiver>, iaddr: net::I
                                     ipv4_packet,
                                     ospf_packet,
                                     iaddr,
+                                    src_mac,
                                 )
                                 .await;
                             }
@@ -551,6 +579,8 @@ pub async fn start_dd_send(
     iaddr: net::Ipv4Addr,
     naddr: net::Ipv4Addr,
     n_master: bool,
+    init: bool,
+    more: bool,
     lsa_headers: Option<Vec<lsa::Header>>,
 ) {
     let g_handles = HANDLE_MAP.read().await;
@@ -559,14 +589,17 @@ pub async fn start_dd_send(
     if let Some(dd_send) = &locked_in_handles.dd_send {
         dd_send.abort();
     }
-    let dd_send = tokio::spawn(dd_send(iaddr, naddr, n_master, lsa_headers));
+    let dd_send = tokio::spawn(dd_send(iaddr, naddr, n_master, init, more, lsa_headers));
     locked_in_handles.dd_send = Some(dd_send);
 }
 
 pub async fn hello_timer(iaddr: net::Ipv4Addr, hello_interval: u16) -> () {
     crate::util::debug("hello timer started.");
-    let inner_packet_tx = super::trans::PACKET_SENDER.clone();
-    let mut buffer: Vec<u8> = vec![0; IPV4_PACKET_MTU - 100];
+    let mut packet_inner_tx = super::trans::get_packet_inner_tx(iaddr).await;
+    let mut buffer: Vec<u8> = vec![0; IPV4_PACKET_MTU];
+    let src_mac = super::get_mac(iaddr).await;
+    let dst_mac = [0x01, 0x00, 0x5E, 0x00, 0x00, 0x05].into();
+    let mut bf: Vec<u8> = vec![0; IPV4_PACKET_MTU + 100];
     let interval = time::Duration::from_secs(hello_interval as u64);
     loop {
         let hello_packet = crate::packet::hello::Hello::new(iaddr).await;
@@ -580,9 +613,11 @@ pub async fn hello_timer(iaddr: net::Ipv4Addr, hello_interval: u16) -> () {
                 }
             }
         };
-        crate::util::log(&format!("{:#?}",hello_packet));
+
+        let ether_packet =
+            crate::packet::build_ether_packet(&mut bf, hello_ipv4_packet, src_mac, dst_mac).await;
         loop {
-            match inner_packet_tx.send(bytes::Bytes::from(hello_ipv4_packet.packet().to_vec())) {
+            match packet_inner_tx.send(bytes::Bytes::from(ether_packet.packet().to_vec())) {
                 Ok(_) => {
                     crate::util::debug("send hello packet success.");
                     break;
@@ -612,15 +647,26 @@ pub async fn dd_send(
     iaddr: net::Ipv4Addr,
     naddr: net::Ipv4Addr,
     n_master: bool,
+    init: bool,
+    more: bool,
     lsa_headers: Option<Vec<lsa::Header>>,
 ) {
     let rxmt_interval = super::get_rxmt_interval(iaddr).await;
     let interval = time::Duration::from_secs(rxmt_interval as u64);
-    let packet_sender = super::trans::PACKET_SENDER.clone();
-    let dd_flags = if n_master { 0 } else { FLAG_MS_BIT };
-    let dd_options = OPTION_E;
+    let packet_inner_tx = super::trans::get_packet_inner_tx(iaddr).await;
+    let mut dd_flags = if n_master { 0 } else { FLAG_MS_BIT };
+    if init {
+        dd_flags |= FLAG_I_BIT;
+    }
+    if more {
+        dd_flags |= FLAG_M_BIT;
+    }
+    let dd_options = 0x42;
     let seqno = get_ddseqno(iaddr, naddr).await;
     let mut buffer = vec![0; IPV4_PACKET_MTU];
+    let mut bf = vec![0; IPV4_PACKET_MTU + 100];
+    let src_mac = super::get_mac(iaddr).await;
+    let dst_mac = neighbor::get_mac(iaddr, naddr).await;
     loop {
         let dd = DD::new(
             iaddr,
@@ -632,7 +678,9 @@ pub async fn dd_send(
         )
         .await;
         let ippacket = dd.build_ipv4_packet(&mut buffer, iaddr, naddr).unwrap();
-        match packet_sender.send(bytes::Bytes::from(ippacket.packet().to_vec())) {
+        let ethet_packet =
+            crate::packet::build_ether_packet(&mut bf, ippacket, src_mac, dst_mac).await;
+        match packet_inner_tx.send(bytes::Bytes::from(ethet_packet.packet().to_vec())) {
             Ok(_) => {
                 crate::util::debug("send dd packet success.");
                 break;
@@ -641,6 +689,7 @@ pub async fn dd_send(
                 crate::util::error(&format!("send dd packet failed:{}", e));
             }
         }
+        save_last_dd(iaddr, naddr, dd.clone()).await;
         time::sleep(interval).await;
     }
 }

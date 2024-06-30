@@ -62,24 +62,22 @@ impl RouteTable {
             ipv4::MutableIpv4Packet::owned(ipv4_packet.packet().to_vec()).unwrap();
         mutable_packet.set_ttl(mutable_packet.get_ttl() - 1);
         mutable_packet.set_checksum(ipv4::checksum(&mutable_packet.to_immutable()));
-        for entry in &self.entries {
-            // if entry.destination_id == ipv4_packet.get_destination()
-            //     && entry.mask == ipv4_packet.get_destination()
-            // {
-            crate::util::debug("forwarding:found route.");
-            let packet_sender = interface::trans::PACKET_SENDER.clone();
-            let imm_packet = mutable_packet.consume_to_immutable();
-            match packet_sender.send(bytes::Bytes::copy_from_slice(imm_packet.packet())) {
-                Ok(_) => {
-                    crate::util::debug("forwarding:send packet success.");
-                }
-                Err(_) => {
-                    crate::util::error("forwarding:send packet failed.");
-                }
-            }
-            return;
-            // }
-        }
+        // let packet_inner_tx =
+        // for entry in &self.entries {
+        //     crate::util::debug("forwarding:found route.");
+        //     let packet_sender = interface::trans::PACKET_SENDER.clone();
+        //     let imm_packet = mutable_packet.consume_to_immutable();
+        //     match packet_sender.send(bytes::Bytes::copy_from_slice(imm_packet.packet())) {
+        //         Ok(_) => {
+        //             crate::util::debug("forwarding:send packet success.");
+        //         }
+        //         Err(_) => {
+        //             crate::util::error("forwarding:send packet failed.");
+        //         }
+        //     }
+        //     return;
+        //     // }
+        // }
         crate::util::error("forwarding:route entry not found.");
     }
 }

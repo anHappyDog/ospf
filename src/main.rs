@@ -30,7 +30,7 @@ pub const ALL_DROTHERS: net::Ipv4Addr = net::Ipv4Addr::new(224, 0, 0, 6);
 pub const OSPF_IP_PROTOCOL: u8 = 89;
 pub const OSPF_VERSION: u8 = 2;
 
-pub const IPV4_PACKET_MTU: usize = 1500;
+pub const IPV4_PACKET_MTU: usize = 1400;
 
 
 #[tokio::main]

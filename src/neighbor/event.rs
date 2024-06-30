@@ -91,7 +91,7 @@ impl Event {
         if super::status::Status::Init == old_status {
             if super::is_adjacent(iaddr, naddr).await {
                 // need to build the adjacency
-                start_dd_send(iaddr, naddr, true, None).await;
+                start_dd_send(iaddr, naddr, false,true,true, None).await;
                 super::set_status(iaddr, naddr, super::status::Status::ExStart).await;
             } else {
                 // do not need to build the adjacency
@@ -111,9 +111,9 @@ impl Event {
             // fill the neighbor's summary list
             let lsa_headers = area::lsdb::fetch_lsa_headers(iaddr).await;
             if n_master {
-                start_dd_send(iaddr, naddr, n_master, None).await;
+                start_dd_send(iaddr, naddr, n_master,false,false, None).await;
             } else {
-                start_dd_send(iaddr, naddr, n_master, Some(lsa_headers)).await;
+                start_dd_send(iaddr, naddr, n_master, false,false,Some(lsa_headers)).await;
             }
         } else {
             crate::util::error("negotiation_done: invalid status,ignored.");
@@ -164,7 +164,7 @@ impl Event {
         if super::status::Status::TwoWay == old_status {
             if super::is_adjacent(iaddr, naddr).await {
                 // start to build the adjacency
-                start_dd_send(iaddr, naddr, true, None).await;
+                start_dd_send(iaddr, naddr, false,true,true, None).await;
                 super::set_status(iaddr, naddr, super::status::Status::ExStart).await;
             } else {
                 crate::util::debug("adj_ok: do not need to build the adjacency,ignored.");
@@ -197,7 +197,7 @@ impl Event {
                 tokio::spawn(super::clear_lsr_list(iaddr.clone(), naddr.clone())),
                 tokio::spawn(super::clear_summary_list(iaddr.clone(), naddr.clone()))
             );
-            start_dd_send(iaddr, naddr, true, None).await;
+            start_dd_send(iaddr, naddr, false,true,true, None).await;
         } else {
             crate::util::error("seq_number_mismatch: invalid status,ignored.");
         }

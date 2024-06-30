@@ -72,6 +72,13 @@ pub struct Interface {
     pub auth_key: u64,
     pub options: u8,
     pub router_priority: u8,
+    pub mac_addr: datalink::MacAddr,
+}
+
+pub async fn get_mac(iaddr: net::Ipv4Addr) -> datalink::MacAddr {
+    let interface_map = INTERFACE_MAP.read().await;
+    let interface = interface_map.get(&iaddr).unwrap();
+    interface.mac_addr
 }
 
 pub async fn get_dr(iaddr: net::Ipv4Addr) -> net::Ipv4Addr {
@@ -224,6 +231,7 @@ pub async fn add(interface: &datalink::NetworkInterface) {
         auth_key,
         options,
         router_priority,
+        mac_addr: interface.mac.unwrap(),
     };
 
     let mut interface_map = INTERFACE_MAP.write().await;

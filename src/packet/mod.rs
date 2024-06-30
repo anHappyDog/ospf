@@ -5,10 +5,14 @@ use hello::{Hello, HELLO_TYPE};
 use lsack::{Lsack, LSACK_TYPE};
 use lsr::{Lsr, LSR_TYPE};
 use lsu::{Lsu, LSU_TYPE};
-use pnet::packet::{
-    ip,
-    ipv4::{self, Ipv4Packet},
-    Packet,
+use pnet::{
+    packet::{
+        ethernet::{EtherTypes, EthernetPacket, MutableEthernetPacket},
+        ip,
+        ipv4::{self, Ipv4Packet},
+        Packet,
+    },
+    util::MacAddr,
 };
 
 use crate::{ALL_SPF_ROUTERS, OSPF_IP_PROTOCOL};
@@ -29,6 +33,20 @@ pub struct OspfHeader {
     pub checksum: u16,
     pub auth_type: u16,
     pub authentication: u64,
+}
+
+pub async fn build_ether_packet<'a>(
+    bf: &'a mut Vec<u8>,
+    ipv4_packet: Ipv4Packet<'a>,
+    src_mac: MacAddr,
+    dst_mac: MacAddr,
+) -> EthernetPacket<'a> {
+    let mut ether_packet = MutableEthernetPacket::new(bf).unwrap();
+    ether_packet.set_destination(dst_mac);
+    ether_packet.set_source(src_mac);
+    ether_packet.set_ethertype(EtherTypes::Ipv4);
+    ether_packet.set_payload(ipv4_packet.packet().to_vec().as_slice());
+    ether_packet.consume_to_immutable()
 }
 
 impl std::fmt::Debug for OspfHeader {
@@ -167,30 +185,23 @@ impl OspfPacket {
         ipv4_packet: Ipv4Packet<'a>,
         ospf_packet: OspfPacket,
         iaddr: net::Ipv4Addr,
+        mac_addr: MacAddr,
     ) {
         match ospf_packet {
             OspfPacket::Hello(hello_packet) => {
-                tokio::spawn(Hello::received(
-                    hello_packet,
-                    ipv4_packet.get_source(),
-                    iaddr,
-                ));
+                Hello::received(hello_packet, ipv4_packet.get_source(), iaddr, mac_addr).await;
             }
             OspfPacket::DD(dd_packet) => {
-                tokio::spawn(DD::received(dd_packet, ipv4_packet.get_source(), iaddr));
+                DD::received(dd_packet, ipv4_packet.get_source(), iaddr).await;
             }
             OspfPacket::LSR(lsr_packet) => {
-                tokio::spawn(Lsr::received(lsr_packet, ipv4_packet.get_source(), iaddr));
+                Lsr::received(lsr_packet, ipv4_packet.get_source(), iaddr).await;
             }
             OspfPacket::LSU(lsu_packet) => {
-                tokio::spawn(Lsu::received(lsu_packet, ipv4_packet.get_source(), iaddr));
+                Lsu::received(lsu_packet, ipv4_packet.get_source(), iaddr).await;
             }
             OspfPacket::LSACK(lsack_packet) => {
-                tokio::spawn(Lsack::received(
-                    lsack_packet,
-                    ipv4_packet.get_source(),
-                    iaddr,
-                ));
+                Lsack::received(lsack_packet, ipv4_packet.get_source(), iaddr).await;
             }
         }
     }
@@ -200,7 +211,11 @@ impl OspfPacket {
         match ipv4_packet.get_next_level_protocol() {
             ip::IpNextHeaderProtocol(OSPF_IP_PROTOCOL) => {
                 let payload = ipv4_packet.payload();
-                crate::util::debug(&format!("{:#?},packet length is {}",ipv4_packet,ipv4_packet.payload().len()));
+                crate::util::debug(&format!(
+                    "{:#?},packet length is {}",
+                    ipv4_packet,
+                    ipv4_packet.payload().len()
+                ));
                 match crate::packet::OspfHeader::try_from_be_bytes(payload) {
                     Some(ospf_header) => match ospf_header.packet_type {
                         HELLO_TYPE => {
@@ -209,7 +224,7 @@ impl OspfPacket {
                             match hello_packet {
                                 Some(hello_packet) => {
                                     crate::util::debug("ospf hello packet received.");
-                                    crate::util::debug(&format!("{:#?}",hello_packet));
+                                    crate::util::debug(&format!("{:#?}", hello_packet));
                                     Ok(crate::packet::OspfPacket::Hello(hello_packet))
                                 }
                                 None => Err("invalid hello packet,ignored."),

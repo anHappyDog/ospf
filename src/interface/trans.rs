@@ -10,16 +10,23 @@ pub struct Transmission {
     pub inner_dd_tx: broadcast::Sender<DD>,
     pub inner_lsr_tx: broadcast::Sender<bytes::Bytes>,
     pub inner_lsu_tx: broadcast::Sender<bytes::Bytes>,
+    pub inner_packet_tx: broadcast::Sender<bytes::Bytes>,
 }
 
 lazy_static::lazy_static! {
     pub static ref TRANSMISSIONS : Arc<RwLock<HashMap<net::Ipv4Addr,Transmission>>> = Arc::new(RwLock::new(HashMap::new()));
-    pub static ref PACKET_SENDER : broadcast::Sender<bytes::Bytes> = init_packet_sender();
 }
 
-pub fn init_packet_sender() -> broadcast::Sender<bytes::Bytes> {
-    let (tx, _) = broadcast::channel(1024);
-    tx
+pub async fn get_packet_inner_tx(iaddr: net::Ipv4Addr) -> broadcast::Sender<bytes::Bytes> {
+    let transmissions = TRANSMISSIONS.read().await;
+    let transmission = transmissions.get(&iaddr).unwrap();
+    transmission.inner_packet_tx.clone()
+}
+
+pub async fn get_packet_inner_rx(iaddr: net::Ipv4Addr) -> broadcast::Receiver<bytes::Bytes> {
+    let transmissions = TRANSMISSIONS.read().await;
+    let transmission = transmissions.get(&iaddr).unwrap();
+    transmission.inner_packet_tx.subscribe()
 }
 
 pub async fn add(addr: net::Ipv4Addr) {
@@ -30,6 +37,7 @@ pub async fn add(addr: net::Ipv4Addr) {
             inner_dd_tx: broadcast::channel(INNER_BUFFER_LENGTH).0,
             inner_lsr_tx: broadcast::channel(INNER_BUFFER_LENGTH).0,
             inner_lsu_tx: broadcast::channel(INNER_BUFFER_LENGTH).0,
+            inner_packet_tx: broadcast::channel(INNER_BUFFER_LENGTH).0,
         },
     );
 }

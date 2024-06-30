@@ -1,15 +1,18 @@
-use std::{
-    net::{self, Ipv4Addr},
-};
+use std::net::{self, Ipv4Addr};
 
-use pnet::packet::{
-    ip::IpNextHeaderProtocol,
-    ipv4::{Ipv4Packet, MutableIpv4Packet},
+use pnet::{
+    datalink,
+    packet::{
+        ip::IpNextHeaderProtocol,
+        ipv4::{Ipv4Packet, MutableIpv4Packet},
+    },
+    util::MacAddr,
 };
 
 use crate::{
     area,
-    interface::{self, NetworkType}, neighbor, util, OSPF_IP_PROTOCOL, OSPF_VERSION,
+    interface::{self, NetworkType},
+    neighbor, util, OSPF_IP_PROTOCOL, OSPF_VERSION,
 };
 
 use super::ospf_packet_checksum;
@@ -38,7 +41,6 @@ impl Hello {
             self.neighbors.push(naddr.clone().into());
         }
     }
-
     /// create and fill a new hello packet.
     pub async fn new(iaddr: net::Ipv4Addr) -> Self {
         let mut packet = Self::empty();
@@ -125,7 +127,12 @@ impl Hello {
     }
 
     // the packet shoudld be checked before calling this function
-    pub async fn received(packet: Hello, packet_source_addr: net::Ipv4Addr, iaddr: net::Ipv4Addr) {
+    pub async fn received(
+        packet: Hello,
+        packet_source_addr: net::Ipv4Addr,
+        iaddr: net::Ipv4Addr,
+        mac_addr: MacAddr,
+    ) {
         // check the packet is valid
         if !packet.checked(iaddr).await {
             return;
@@ -141,18 +148,14 @@ impl Hello {
             neighbor::add(
                 iaddr,
                 naddr,
-                neighbor::Neighbor::from_hello_packet(&packet, naddr, neighbor_id),
-            )
-            .await;
+                neighbor::Neighbor::from_hello_packet(&packet, naddr, neighbor_id, mac_addr),
+            ).await;
         }
-        // neighbor::event::send(iaddr, naddr, neighbor::event::Event::HelloReceived).await;
         neighbor::event::Event::hello_received(iaddr, naddr).await;
         if packet.neighbors.contains(&u32::from(iaddr.clone())) {
             neighbor::event::Event::two_way_received(naddr, iaddr).await;
             neighbor::update_neighbor(iaddr, naddr, &packet).await;
         } else {
-            // SHOULD EXECUTE THIS IMMEDIATELY
-            //   neighbor::event::send(iaddr, naddr, neighbor::event::Event::OneWayReceived).await;
             neighbor::event::Event::one_way_received(naddr, iaddr).await;
         }
         // currently not handling the NBMA's hello packet receiving.
@@ -175,7 +178,6 @@ impl Hello {
                 payload[i + 3],
             ]));
             i += 4;
-
         }
         Some(Self {
             header: ospf_header,
