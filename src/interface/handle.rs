@@ -93,6 +93,10 @@ pub async fn send_lsu(iaddr: net::Ipv4Addr, naddr: net::Ipv4Addr) {
                 return;
             }
         };
+        if lsas.is_empty() {
+            crate::util::debug("no lsa to send.");
+            return;
+        }
         let lsu_packet = Lsu::new(iaddr, naddr, lsas.clone()).await;
         let ip_packet = Lsu::build_ipv4_packet(lsu_packet.clone(), &mut buffer, iaddr, naddr)
             .await
@@ -595,7 +599,7 @@ pub async fn start_dd_send(
 
 pub async fn hello_timer(iaddr: net::Ipv4Addr, hello_interval: u16) -> () {
     crate::util::debug("hello timer started.");
-    let mut packet_inner_tx = super::trans::get_packet_inner_tx(iaddr).await;
+    let packet_inner_tx = super::trans::get_packet_inner_tx(iaddr).await;
     let mut buffer: Vec<u8> = vec![0; IPV4_PACKET_MTU];
     let src_mac = super::get_mac(iaddr).await;
     let dst_mac = [0x01, 0x00, 0x5E, 0x00, 0x00, 0x05].into();

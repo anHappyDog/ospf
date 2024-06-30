@@ -107,11 +107,9 @@ impl Event {
         let old_status = super::get_status(iaddr, naddr).await;
         if super::status::Status::ExStart == old_status {
             abort_inactive_timer(iaddr, naddr).await;
-            stop_dd_send(iaddr).await;
-            // fill the neighbor's summary list
             let lsa_headers = area::lsdb::fetch_lsa_headers(iaddr).await;
             if n_master {
-                start_dd_send(iaddr, naddr, n_master,false,false, None).await;
+                start_dd_send(iaddr, naddr, n_master,false,true, None).await;
             } else {
                 start_dd_send(iaddr, naddr, n_master, false,false,Some(lsa_headers)).await;
             }
